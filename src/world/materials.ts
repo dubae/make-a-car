@@ -43,9 +43,16 @@ export function plastic(color: number): THREE.MeshPhysicalMaterial {
   });
 }
 
-/** 무광 페인트 표면 (문/몰딩/가구 도장면) */
+/** 무광 페인트 표면 (문/몰딩/가구 도장면) — 도장된 목재처럼 은은한 결 요철 */
 export function painted(color: number, roughness = 0.65): THREE.MeshStandardMaterial {
-  return new THREE.MeshStandardMaterial({ color, roughness, metalness: 0 });
+  const t = tiled('wood', 1.3, 1.3);
+  return new THREE.MeshStandardMaterial({
+    color,
+    roughness,
+    metalness: 0,
+    normalMap: t.normalMap,
+    normalScale: new THREE.Vector2(0.55, 0.55),
+  });
 }
 
 /** 결이 살아있는 원목 (가구/나무 파츠) */
@@ -64,6 +71,7 @@ export function wallMat(tint: number, rx: number, ry: number): THREE.MeshStandar
   return new THREE.MeshStandardMaterial({
     color: tint,
     normalMap: t.normalMap,
+    normalScale: new THREE.Vector2(1.15, 1.15),
     roughnessMap: t.roughnessMap,
     roughness: 1,
   });
@@ -75,6 +83,7 @@ export function fabricMat(tint: number, repeat = 2): THREE.MeshStandardMaterial 
   return new THREE.MeshStandardMaterial({
     color: tint,
     normalMap: t.normalMap,
+    normalScale: new THREE.Vector2(1.35, 1.35),
     roughnessMap: t.roughnessMap,
     roughness: 1,
   });
@@ -90,6 +99,18 @@ export function plaidMat(tint: number, repeat = 2): THREE.MeshStandardMaterial {
 /** 콘크리트 (차고 바닥) */
 export function concreteMat(rx: number, ry: number): THREE.MeshStandardMaterial {
   return new THREE.MeshStandardMaterial({ ...tiled('concrete', rx, ry) });
+}
+
+/** 카펫 — 색 패턴은 캔버스 맵으로, 보풀(pile) 요철은 카펫 텍스처로 */
+export function carpetMat(map: THREE.Texture): THREE.MeshStandardMaterial {
+  const t = tiled('carpet', 9, 9);
+  return new THREE.MeshStandardMaterial({
+    map,
+    normalMap: t.normalMap,
+    normalScale: new THREE.Vector2(2.2, 2.2),
+    roughnessMap: t.roughnessMap,
+    roughness: 1,
+  });
 }
 
 /** 고무 (바퀴) */

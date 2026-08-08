@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { World, RigidBodyDesc, ColliderDesc } from '@dimforge/rapier3d-compat';
-import { plastic, painted, woodMat, floorMat, wallMat, fabricMat, plaidMat, TOY_COLORS } from './materials';
+import { plastic, painted, woodMat, floorMat, wallMat, fabricMat, plaidMat, carpetMat, TOY_COLORS } from './materials';
 
 /**
  * "작아진 사람" 스케일의 실제 아이 방.
@@ -153,7 +153,7 @@ function buildWallsAndCeiling(scene: THREE.Scene, world: World): void {
   // 천장 — 그림자를 만들지 않아 "창문 햇살"이 방 안까지 들어온다
   const ceiling = new THREE.Mesh(
     new THREE.BoxGeometry(ROOM_HALF_X * 2, 0.5, ROOM_HALF_Z * 2),
-    painted(0xfaf5ea, 0.9),
+    wallMat(0xfaf5ea, 8, 5),
   );
   ceiling.position.set(0, WALL_HEIGHT + 0.25, 0);
   scene.add(ceiling);
@@ -166,10 +166,10 @@ function buildWindowsAndCurtains(scene: THREE.Scene): void {
     const glass = new THREE.Mesh(new THREE.PlaneGeometry(20, 15), new THREE.MeshBasicMaterial({ color: 0xd8f0ff }));
     g.add(glass);
     const hill = new THREE.Mesh(new THREE.CircleGeometry(9, 24), new THREE.MeshBasicMaterial({ color: 0xa5dba0 }));
-    hill.position.set(-4, -6.2, 0.05);
+    hill.position.set(-4, -6.2, 0.12);
     g.add(hill);
     const sun = new THREE.Mesh(new THREE.CircleGeometry(2.2, 20), new THREE.MeshBasicMaterial({ color: 0xffe98a }));
-    sun.position.set(6, 4.5, 0.05);
+    sun.position.set(6, 4.5, 0.12);
     g.add(sun);
 
     const frameMat = painted(0xffffff, 0.45);
@@ -209,9 +209,9 @@ function buildWindowsAndCurtains(scene: THREE.Scene): void {
   };
 
   // 뒷벽(햇빛 방향) 창문 2개 + 왼쪽 벽 창문 1개
-  makeWindow(-22, -ROOM_HALF_Z + 0.6, 0, true);
-  makeWindow(8, -ROOM_HALF_Z + 0.6, 0, true);
-  makeWindow(-ROOM_HALF_X + 0.6, 8, Math.PI / 2, false);
+  makeWindow(-22, -ROOM_HALF_Z + 0.85, 0, true);
+  makeWindow(8, -ROOM_HALF_Z + 0.85, 0, true);
+  makeWindow(-ROOM_HALF_X + 0.85, 8, Math.PI / 2, false);
 }
 
 function buildDoor(scene: THREE.Scene): void {
@@ -240,18 +240,43 @@ function buildDoor(scene: THREE.Scene): void {
 }
 
 function buildRug(scene: THREE.Scene): void {
-  const rings: [number, number][] = [
-    [17, 0x6fb7e0],
-    [13, 0xf3d55f],
-    [9, 0xef8d5d],
-    [5, 0xf6f0e4],
-  ];
-  rings.forEach(([r, c], i) => {
-    const ring = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.06 + i * 0.015, 48), fabricMat(c, 7));
-    ring.position.set(2, 0.04 + i * 0.008, 8);
-    ring.receiveShadow = true;
-    scene.add(ring);
+  // 링 무늬와 보풀 스펙클을 캔버스에 굽고, 카펫 텍스처의 파일(pile) 요철을 입힌 원형 카펫.
+  // 단일 메시라 링끼리 겹치며 생기던 z-fighting도 사라진다.
+  const size = 1024;
+  const map = makeCanvasTexture(size, size, (ctx) => {
+    const rings: [number, string][] = [
+      [17, '#5da8d6'],
+      [13, '#e8c94f'],
+      [9, '#e07f4e'],
+      [5, '#efe7d5'],
+    ];
+    for (const [r, color] of rings) {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(size / 2, size / 2, (r / 17) * (size / 2), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 보풀 느낌의 미세 스펙클
+    for (let i = 0; i < 30000; i++) {
+      const x = Math.random() * size;
+      const y = Math.random() * size;
+      if (Math.hypot(x - size / 2, y - size / 2) > size / 2 - 2) continue;
+      const a = 0.04 + Math.random() * 0.09;
+      ctx.fillStyle = Math.random() < 0.55 ? `rgba(40,25,10,${a})` : `rgba(255,250,240,${a * 0.8})`;
+      ctx.fillRect(x, y, 1.7, 1.7);
+    }
+    // 가장자리 오버로크 스티치
+    ctx.strokeStyle = 'rgba(60,40,20,0.35)';
+    ctx.lineWidth = 7;
+    ctx.setLineDash([10, 7]);
+    ctx.beginPath();
+    ctx.arc(size / 2, size / 2, size / 2 - 6, 0, Math.PI * 2);
+    ctx.stroke();
   });
+  const rug = new THREE.Mesh(new THREE.CylinderGeometry(17, 17, 0.14, 64), carpetMat(map));
+  rug.position.set(2, 0.08, 8);
+  rug.receiveShadow = true;
+  scene.add(rug);
 }
 
 // ---------------------------------------------------------------- 가구
@@ -297,8 +322,8 @@ function buildDeskAndChair(scene: THREE.Scene, world: World): void {
     addStaticBox(scene, world, [1.4, topY, 1.4], [cx + sx * 5, topY / 2, cz + sz * 11.3], woodMat(0xb98e62, 1.5));
   }
   // 책상 위 소품 (장식): 책 더미 + 연필꽂이
-  decoBox(scene, [7, 1, 5], [cx - 1, topY + 1.7, cz - 6], TOY_COLORS.red);
-  decoBox(scene, [6, 1, 4.4], [cx - 0.6, topY + 2.7, cz - 5.7], TOY_COLORS.blue, 0.15);
+  decoBox(scene, [7, 1, 5], [cx - 1, topY + 1.73, cz - 6], TOY_COLORS.red);
+  decoBox(scene, [6, 1, 4.4], [cx - 0.6, topY + 2.76, cz - 5.7], TOY_COLORS.blue, 0.15);
   const cup = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.3, 3, 14), plastic(TOY_COLORS.purple));
   cup.position.set(cx + 2, topY + 2.7, cz + 6);
   cup.castShadow = true;
@@ -344,7 +369,7 @@ function buildBookshelf(scene: THREE.Scene, world: World): void {
       const bw = 1 + ((seedIdx * 37) % 10) / 10;
       const bh = 7.2 + ((seedIdx * 53) % 20) / 10;
       const lean = seedIdx % 7 === 3 ? 0.12 : 0;
-      const book = decoBox(scene, [bw, bh, 3.6], [bx + bw / 2, shelfY + bh / 2, cz], bookColors[seedIdx % bookColors.length]);
+      const book = decoBox(scene, [bw, bh, 3.6], [bx + bw / 2, shelfY + bh / 2 + 0.03, cz - 0.06 + (seedIdx % 3) * 0.06], bookColors[seedIdx % bookColors.length]);
       book.rotation.z = lean;
       bx += bw + 0.25;
       seedIdx++;
@@ -435,7 +460,7 @@ function buildFloorClutter(scene: THREE.Scene, world: World): void {
   const positions: [number, number, number, number][] = [
     // [x, y, z, rotY]
     [-10, 1.5, -12, 0.3],
-    [-10.2, 4.5, -12.2, -0.2],
+    [-10.2, 4.53, -12.2, -0.2],
     [-6.5, 1.5, -10, 0.9],
     [16, 1.5, -4, -0.5],
     [27, 1.5, 4, 0.2],

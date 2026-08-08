@@ -11,7 +11,7 @@ export interface PbrMaps {
   roughnessMap: THREE.Texture;
 }
 
-export type TexName = 'floor' | 'wood' | 'fabric' | 'wall' | 'concrete';
+export type TexName = 'floor' | 'wood' | 'fabric' | 'wall' | 'concrete' | 'carpet';
 
 const sets = {} as Record<TexName, PbrMaps>;
 let envMap: THREE.Texture | null = null;
@@ -27,7 +27,7 @@ export function environment(): THREE.Texture {
 export async function loadAssets(renderer: THREE.WebGLRenderer): Promise<void> {
   const base = import.meta.env.BASE_URL;
   const loader = new THREE.TextureLoader();
-  const names: TexName[] = ['floor', 'wood', 'fabric', 'wall', 'concrete'];
+  const names: TexName[] = ['floor', 'wood', 'fabric', 'wall', 'concrete', 'carpet'];
 
   const jobs: Promise<void>[] = names.map(async (n) => {
     const [map, normalMap, roughnessMap] = await Promise.all([
