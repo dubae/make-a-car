@@ -43,15 +43,25 @@ export function plastic(color: number): THREE.MeshPhysicalMaterial {
   });
 }
 
-/** 무광 페인트 표면 (문/몰딩/가구 도장면) — 도장된 목재처럼 은은한 결 요철 */
-export function painted(color: number, roughness = 0.65): THREE.MeshStandardMaterial {
-  const t = tiled('wood', 1.3, 1.3);
+/**
+ * 도장 목재 (문/몰딩/가구/장난감상자 등 모든 도장면).
+ * 오크 diffuse를 깔아 나뭇결이 눈에 보이게 하고, 오크의 평균색을 채널 게인으로
+ * 상쇄해 지정한 색이 유지되게 한다 (곱셈 탁색 방지).
+ */
+export function painted(color: number, roughness = 0.6): THREE.MeshStandardMaterial {
+  const t = tiled('wood', 1.6, 1.6);
+  const tint = new THREE.Color(color);
+  tint.r *= 1.5;
+  tint.g *= 1.7;
+  tint.b *= 2.0;
   return new THREE.MeshStandardMaterial({
-    color,
+    color: tint,
+    map: t.map,
+    normalMap: t.normalMap,
+    normalScale: new THREE.Vector2(0.8, 0.8),
+    roughnessMap: t.roughnessMap,
     roughness,
     metalness: 0,
-    normalMap: t.normalMap,
-    normalScale: new THREE.Vector2(0.55, 0.55),
   });
 }
 

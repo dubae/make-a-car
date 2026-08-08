@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { World, RigidBodyDesc, ColliderDesc } from '@dimforge/rapier3d-compat';
+import { tex as pbrTex } from './assets';
 import { plastic, painted, woodMat, floorMat, wallMat, fabricMat, plaidMat, carpetMat, TOY_COLORS } from './materials';
 
 /**
@@ -322,8 +323,8 @@ function buildDeskAndChair(scene: THREE.Scene, world: World): void {
     addStaticBox(scene, world, [1.4, topY, 1.4], [cx + sx * 5, topY / 2, cz + sz * 11.3], woodMat(0xb98e62, 1.5));
   }
   // 책상 위 소품 (장식): 책 더미 + 연필꽂이
-  decoBox(scene, [7, 1, 5], [cx - 1, topY + 1.73, cz - 6], TOY_COLORS.red);
-  decoBox(scene, [6, 1, 4.4], [cx - 0.6, topY + 2.76, cz - 5.7], TOY_COLORS.blue, 0.15);
+  decoBox(scene, [7, 1, 5], [cx - 1, topY + 1.73, cz - 6], fabricMat(TOY_COLORS.red, 3));
+  decoBox(scene, [6, 1, 4.4], [cx - 0.6, topY + 2.76, cz - 5.7], fabricMat(TOY_COLORS.blue, 3), 0.15);
   const cup = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.3, 3, 14), plastic(TOY_COLORS.purple));
   cup.position.set(cx + 2, topY + 2.7, cz + 6);
   cup.castShadow = true;
@@ -335,14 +336,33 @@ function buildDeskAndChair(scene: THREE.Scene, world: World): void {
     scene.add(pen);
   }
 
-  // 의자 (실제 의자 좌면 32cm ≈ 6유닛 — 작아진 사람은 올라갈 수 없는 높이)
+  // 의자 — 래더백(사다리 등받이). 뒷다리 2개가 바닥에서 등받이 꼭대기까지 이어지고
+  // 좌면 뒤쪽(책상 반대편)에 가로 슬랫이 붙는다. 회전(rot)을 오프셋에 직접 적용해
+  // 모든 부재가 좌면과 정확히 정렬된다.
   const chX = 29;
   const seatY = 6.5;
-  addStaticBox(scene, world, [9, 1.2, 9], [chX, seatY, cz], TOY_COLORS.teal, -0.15);
-  for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
-    addStaticBox(scene, world, [1, seatY, 1], [chX + sx * 3.6, seatY / 2, cz + sz * 3.6], TOY_COLORS.woodDark, -0.15);
+  const rot = -0.15;
+  const at = (dx: number, dz: number): [number, number] => [
+    chX + dx * Math.cos(rot) + dz * Math.sin(rot),
+    cz - dx * Math.sin(rot) + dz * Math.cos(rot),
+  ];
+  {
+    // 좌면
+    const [x, z] = at(0, 0);
+    addStaticBox(scene, world, [9, 1.2, 9], [x, seatY, z], painted(TOY_COLORS.teal, 0.55), rot);
   }
-  addStaticBox(scene, world, [9, 11, 1.2], [chX + 4.2, seatY + 6, cz], TOY_COLORS.teal, -0.15);
+  // 앞다리 2개 (짧음) + 뒷다리 2개 (등받이 꼭대기까지)
+  for (const sz of [-1, 1] as const) {
+    const [fx, fz] = at(3.6, sz * 3.6);
+    addStaticBox(scene, world, [1, seatY, 1], [fx, seatY / 2, fz], woodMat(0xb98e62, 1.2), rot);
+    const [bx2, bz2] = at(-3.6, sz * 3.6);
+    addStaticBox(scene, world, [1, 18, 1], [bx2, 9, bz2], woodMat(0xb98e62, 1.2), rot);
+  }
+  // 등받이 가로 슬랫 2개 (뒷다리 사이)
+  for (const [sy, sh] of [[13.2, 2.8], [16.3, 1.6]] as const) {
+    const [x, z] = at(-3.6, 0);
+    addStaticBox(scene, world, [0.9, sh, 7.2], [x, sy, z], painted(TOY_COLORS.teal, 0.55), rot);
+  }
 }
 
 function buildBookshelf(scene: THREE.Scene, world: World): void {
@@ -369,7 +389,11 @@ function buildBookshelf(scene: THREE.Scene, world: World): void {
       const bw = 1 + ((seedIdx * 37) % 10) / 10;
       const bh = 7.2 + ((seedIdx * 53) % 20) / 10;
       const lean = seedIdx % 7 === 3 ? 0.12 : 0;
-      const book = decoBox(scene, [bw, bh, 3.6], [bx + bw / 2, shelfY + bh / 2 + 0.03, cz - 0.06 + (seedIdx % 3) * 0.06], bookColors[seedIdx % bookColors.length]);
+      const bookMat =
+        seedIdx % 4 === 2
+          ? plaidMat(0xf0e6d8, 2)
+          : fabricMat(bookColors[seedIdx % bookColors.length], 3);
+      const book = decoBox(scene, [bw, bh, 3.6], [bx + bw / 2, shelfY + bh / 2 + 0.03, cz - 0.06 + (seedIdx % 3) * 0.06], bookMat);
       book.rotation.z = lean;
       bx += bw + 0.25;
       seedIdx++;
@@ -466,9 +490,19 @@ function buildFloorClutter(scene: THREE.Scene, world: World): void {
     [27, 1.5, 4, 0.2],
   ];
   positions.forEach(([x, y, z, rotY], i) => {
-    const tex = makeCanvasTexture(128, 128, (ctx) => {
-      ctx.fillStyle = '#fdf6e8';
+    const blockTex = makeCanvasTexture(128, 128, (ctx) => {
+      ctx.fillStyle = '#f3e4c8';
       ctx.fillRect(0, 0, 128, 128);
+      // 나무결 스트릭
+      for (let g = 0; g < 22; g++) {
+        ctx.strokeStyle = `rgba(140, 95, 45, ${0.06 + Math.random() * 0.1})`;
+        ctx.lineWidth = 1 + Math.random() * 2.5;
+        const gy = Math.random() * 128;
+        ctx.beginPath();
+        ctx.moveTo(0, gy);
+        ctx.bezierCurveTo(40, gy + Math.random() * 8 - 4, 90, gy + Math.random() * 8 - 4, 128, gy);
+        ctx.stroke();
+      }
       ctx.strokeStyle = '#00000022';
       ctx.lineWidth = 10;
       ctx.strokeRect(8, 8, 112, 112);
@@ -478,7 +512,12 @@ function buildFloorClutter(scene: THREE.Scene, world: World): void {
       ctx.textBaseline = 'middle';
       ctx.fillText(letters[i], 64, 70);
     });
-    const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.55 });
+    const mat = new THREE.MeshStandardMaterial({
+      map: blockTex,
+      roughness: 0.55,
+      normalMap: pbrTex('wood').normalMap,
+      normalScale: new THREE.Vector2(0.9, 0.9),
+    });
     addStaticBox(scene, world, [3, 3, 3], [x, y, z], mat, rotY);
   });
 
@@ -521,7 +560,7 @@ function buildFloorClutter(scene: THREE.Scene, world: World): void {
     page.castShadow = true;
     openBook.add(page);
   }
-  const cover = new THREE.Mesh(new THREE.BoxGeometry(11.6, 0.35, 8), painted(TOY_COLORS.green, 0.7));
+  const cover = new THREE.Mesh(new THREE.BoxGeometry(11.6, 0.35, 8), fabricMat(TOY_COLORS.green, 3));
   cover.position.y = 0.18;
   openBook.add(cover);
   openBook.position.set(-2, 0, -24);
