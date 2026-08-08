@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { World, RigidBody, RigidBodyDesc, ColliderDesc } from '@dimforge/rapier3d-compat';
 import { createRng, pick, range } from '../core/rng';
-import { toonMaterial, TOY_COLORS } from './materials';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { plastic, woodMat, rubber, TOY_COLORS } from './materials';
 
 export type ToyShape = 'box' | 'cylinder' | 'ball';
 
@@ -9,6 +10,8 @@ export interface ToyPartSpec {
   /** 결과 화면에 표시되는 이름 */
   name: string;
   shape: ToyShape;
+  /** 재질 — 미지정 시 광택 플라스틱 */
+  material?: 'wood' | 'rubber';
   /** box: [가로, 높이, 세로] / cylinder: [반지름, 높이] / ball: [반지름] */
   size: [number, number, number];
   colors: readonly number[];
@@ -32,6 +35,7 @@ export const PART_CATALOG: ToyPartSpec[] = [
   {
     name: '나무 블록',
     shape: 'box',
+    material: 'wood',
     size: [0.9, 0.9, 0.9],
     colors: [TOY_COLORS.wood, TOY_COLORS.woodDark, TOY_COLORS.yellow, TOY_COLORS.orange],
     density: 0.55,
@@ -41,6 +45,7 @@ export const PART_CATALOG: ToyPartSpec[] = [
   {
     name: '나무 판자',
     shape: 'box',
+    material: 'wood',
     size: [1.8, 0.22, 0.75],
     colors: [TOY_COLORS.wood, TOY_COLORS.woodDark],
     density: 0.5,
@@ -50,6 +55,7 @@ export const PART_CATALOG: ToyPartSpec[] = [
   {
     name: '장난감 바퀴',
     shape: 'cylinder',
+    material: 'rubber',
     size: [0.6, 0.42, 0],
     colors: [TOY_COLORS.dark],
     density: 0.9,
@@ -120,7 +126,7 @@ export class ToyPart {
   }
 
   setHighlight(mode: 'none' | 'hover' | 'held'): void {
-    const mat = this.mesh.material as THREE.MeshToonMaterial;
+    const mat = this.mesh.material as THREE.MeshStandardMaterial;
     const e = mode === 'none' ? this.baseEmissive : mode === 'hover' ? 0x554400 : 0x114411;
     mat.emissive.setHex(e);
   }
@@ -135,12 +141,29 @@ export class ToyPart {
 
 function buildGeometry(spec: ToyPartSpec): THREE.BufferGeometry {
   switch (spec.shape) {
-    case 'box':
-      return new THREE.BoxGeometry(spec.size[0], spec.size[1], spec.size[2]);
+    case 'box': {
+      // 라운드 엣지 — 실제 장난감 블록처럼 모서리가 둥글다
+      const r = Math.min(spec.size[0], spec.size[1], spec.size[2]) * 0.14;
+      return new RoundedBoxGeometry(spec.size[0], spec.size[1], spec.size[2], 3, r);
+    }
     case 'cylinder':
       return new THREE.CylinderGeometry(spec.size[0], spec.size[0], spec.size[1], 24);
     case 'ball':
       return new THREE.SphereGeometry(spec.size[0], 20, 14);
+  }
+}
+
+function buildMaterial(spec: ToyPartSpec, color: number): THREE.Material {
+  switch (spec.material) {
+    case 'wood': {
+      // diffuse 곱셈으로 어두워지지 않게 흰색 쪽으로 보간한 틴트 사용
+      const tint = new THREE.Color(color).lerp(new THREE.Color(0xffffff), 0.55).getHex();
+      return woodMat(tint, 0.7);
+    }
+    case 'rubber':
+      return rubber(color);
+    default:
+      return plastic(color);
   }
 }
 
@@ -209,7 +232,7 @@ export function spawnToyParts(scene: THREE.Scene, world: World, area: SpawnArea,
     }
 
     const color = pick(rng, spec.colors);
-    const mesh = new THREE.Mesh(buildGeometry(spec), toonMaterial(color));
+    const mesh = new THREE.Mesh(buildGeometry(spec), buildMaterial(spec, color));
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     scene.add(mesh);

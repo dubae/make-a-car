@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { World, RigidBodyDesc, ColliderDesc } from '@dimforge/rapier3d-compat';
-import { toonMaterial, TOY_COLORS } from './materials';
+import { plastic, painted, concreteMat, TOY_COLORS } from './materials';
 import type { ToyPart } from './ToyParts';
 
 const WALL_H = 9; // 벽 높이
@@ -34,7 +34,7 @@ export class Garage {
     color: number,
     rotZ = 0,
   ): void {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), toonMaterial(color));
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), painted(color, 0.6));
     mesh.position.set(...pos);
     mesh.rotation.z = rotZ;
     mesh.castShadow = true;
@@ -62,14 +62,14 @@ export class Garage {
 
     // 모서리 흰 트림 기둥
     for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
-      const post = new THREE.Mesh(new THREE.BoxGeometry(1.1, WALL_H + 0.2, 1.1), toonMaterial(trim));
+      const post = new THREE.Mesh(new THREE.BoxGeometry(1.1, WALL_H + 0.2, 1.1), painted(trim, 0.5));
       post.position.set(cx + sx * (HALF_X - 0.55), (WALL_H + 0.2) / 2, cz + sz * (HALF_Z - 0.55));
       post.castShadow = true;
       scene.add(post);
     }
 
     // 반쯤 말려 올라간 셔터 (개구부 안쪽 상단의 롤 + 슬랫 두 줄)
-    const rollMat = toonMaterial(0xc9c9cf);
+    const rollMat = new THREE.MeshStandardMaterial({ color: 0xc9c9cf, metalness: 0.75, roughness: 0.42 });
     const roll = new THREE.Mesh(new THREE.CylinderGeometry(1.05, 1.05, HALF_X * 2 - 2, 16), rollMat);
     roll.rotation.z = Math.PI / 2;
     roll.position.set(cx, WALL_H - 2.4, cz - HALF_Z + 1.4);
@@ -82,7 +82,7 @@ export class Garage {
     }
     // 셔터 레일
     for (const s of [-1, 1]) {
-      const rail = new THREE.Mesh(new THREE.BoxGeometry(0.5, WALL_H - 1, 0.5), toonMaterial(0xb9b9bf));
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(0.5, WALL_H - 1, 0.5), new THREE.MeshStandardMaterial({ color: 0xb9b9bf, metalness: 0.7, roughness: 0.45 }));
       rail.position.set(cx + s * (HALF_X - 1.15), (WALL_H - 1) / 2, cz - HALF_Z + 0.55);
       scene.add(rail);
     }
@@ -100,7 +100,7 @@ export class Garage {
       this.wall(scene, size, pos, TOY_COLORS.red, -s * slope);
     }
     // 용마루
-    const ridge = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.8, HALF_Z * 2 + 2.2), toonMaterial(0xc23d3d));
+    const ridge = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.8, HALF_Z * 2 + 2.2), painted(0xc23d3d, 0.5));
     ridge.position.set(cx, WALL_H + ROOF_RISE + 0.55, cz);
     ridge.castShadow = true;
     scene.add(ridge);
@@ -113,7 +113,7 @@ export class Garage {
     tri.closePath();
     const gableGeo = new THREE.ExtrudeGeometry(tri, { depth: 0.8, bevelEnabled: false });
     for (const s of [-1, 1]) {
-      const gable = new THREE.Mesh(gableGeo, toonMaterial(0xe3d5ba));
+      const gable = new THREE.Mesh(gableGeo, painted(0xe3d5ba, 0.65));
       gable.position.set(cx, WALL_H, cz + s * (HALF_Z - 0.4) - 0.4);
       gable.castShadow = true;
       scene.add(gable);
@@ -124,7 +124,7 @@ export class Garage {
     win.position.set(cx + HALF_X - 0.85, 5.2, cz + 1);
     win.rotation.y = Math.PI / 2;
     scene.add(win);
-    const winFrame = new THREE.Mesh(new THREE.BoxGeometry(0.3, 3, 3.8), toonMaterial(0xffffff));
+    const winFrame = new THREE.Mesh(new THREE.BoxGeometry(0.3, 3, 3.8), painted(0xffffff, 0.45));
     winFrame.position.set(cx + HALF_X - 0.95, 5.2, cz + 1);
     scene.add(winFrame);
     const winGlass = win.clone();
@@ -141,13 +141,13 @@ export class Garage {
     const { x: cx, z: cz } = this.center;
 
     // 콘크리트 바닥 슬래브 (얇은 장식)
-    const slab = new THREE.Mesh(new THREE.BoxGeometry(HALF_X * 2 - 1, 0.1, HALF_Z * 2 - 1), toonMaterial(0x9d9da4));
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(HALF_X * 2 - 1, 0.1, HALF_Z * 2 - 1), concreteMat(2, 1.8));
     slab.position.set(cx, 0.05, cz);
     slab.receiveShadow = true;
     scene.add(slab);
 
     // 주차 라인 (노란 ㄷ자)
-    const lineMat = toonMaterial(TOY_COLORS.yellow);
+    const lineMat = painted(TOY_COLORS.yellow, 0.55);
     const lines: [number, number, number, number][] = [
       // [w, d, dx, dz]
       [0.5, 9, -4.5, 0.5],
@@ -169,7 +169,7 @@ export class Garage {
     for (let i = 0; i < 8; i++) {
       const stripe = new THREE.Mesh(
         new THREE.BoxGeometry(1.62, 0.08, 1.4),
-        toonMaterial(i % 2 === 0 ? TOY_COLORS.yellow : 0x3c3c42),
+        painted(i % 2 === 0 ? TOY_COLORS.yellow : 0x3c3c42, 0.55),
       );
       stripe.position.set(cx - HALF_X + 1.3 + i * 1.66, 0.04, cz - HALF_Z - 0.9);
       stripe.receiveShadow = true;
@@ -208,7 +208,7 @@ export class Garage {
     scene.add(sign);
 
     // 지붕 위 회전 화살표 비콘 (멀리서도 차고지가 보이게)
-    this.arrow = new THREE.Mesh(new THREE.ConeGeometry(1.3, 2.6, 4), toonMaterial(TOY_COLORS.yellow));
+    this.arrow = new THREE.Mesh(new THREE.ConeGeometry(1.3, 2.6, 4), plastic(TOY_COLORS.yellow));
     this.arrow.rotation.x = Math.PI;
     this.arrow.position.set(cx, WALL_H + ROOF_RISE + 5, cz);
     scene.add(this.arrow);

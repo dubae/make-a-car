@@ -12,7 +12,7 @@ npm run typecheck  # 타입체크만
 
 ## 컨벤션
 
-- 스택: Three.js(토온 셰이딩) + Rapier WASM(`@dimforge/rapier3d-compat`) + Vite/TS. 외부 에셋 없이 프리미티브 + 코드 생성 텍스처만 사용.
+- 스택: Three.js(PBR + ACES 톤매핑 + HDRI 환경광) + Rapier WASM(`@dimforge/rapier3d-compat`) + Vite/TS. 지오메트리는 프리미티브, 재질은 Poly Haven CC0 텍스처(`public/textures/`, `public/hdri/`). 머티리얼은 `src/world/materials.ts` 팩토리만 사용.
 - Rapier는 `main.ts`에서 `await RAPIER.init()` 후 어디서든 named import로 사용 (`import { World } from '@dimforge/rapier3d-compat'`).
 - 물리 강체가 소스 오브 트루스 — Three 메시는 `syncMesh()`로 따라감.
 - UI 텍스트는 한국어. HUD는 DOM 오버레이 (index.html에 마크업, `src/ui/Hud.ts`에서 제어).

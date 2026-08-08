@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { World, RigidBodyDesc, ColliderDesc } from '@dimforge/rapier3d-compat';
-import { toonMaterial, TOY_COLORS } from './materials';
+import { plastic, painted, woodMat, floorMat, wallMat, fabricMat, plaidMat, TOY_COLORS } from './materials';
 
 /**
  * "작아진 사람" 스케일의 실제 아이 방.
@@ -40,7 +40,7 @@ function addStaticBox(
   rotY = 0,
   shadows = true,
 ): THREE.Mesh {
-  const mat = typeof color === 'number' ? toonMaterial(color) : color;
+  const mat = typeof color === 'number' ? painted(color) : color;
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), mat);
   mesh.position.set(...pos);
   mesh.rotation.y = rotY;
@@ -67,7 +67,7 @@ function decoBox(
   color: number | THREE.Material,
   rotY = 0,
 ): THREE.Mesh {
-  const mat = typeof color === 'number' ? toonMaterial(color) : color;
+  const mat = typeof color === 'number' ? painted(color) : color;
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), mat);
   mesh.position.set(...pos);
   mesh.rotation.y = rotY;
@@ -90,26 +90,22 @@ function makeCanvasTexture(w: number, h: number, draw: (ctx: CanvasRenderingCont
 // ---------------------------------------------------------------- 방 구조
 
 function buildFloor(scene: THREE.Scene, world: World): void {
-  // 원목 마루 — 널판 줄무늬
-  const plankW = 6;
-  for (let i = 0; i < (ROOM_HALF_X * 2) / plankW; i++) {
-    const shade = [0xdfae72, 0xd6a367, 0xcf9c5e][i % 3];
-    const plank = new THREE.Mesh(
-      new THREE.BoxGeometry(plankW - 0.15, 0.2, ROOM_HALF_Z * 2),
-      toonMaterial(shade),
-    );
-    plank.position.set(-ROOM_HALF_X + plankW / 2 + i * plankW, -0.1, 0);
-    plank.receiveShadow = true;
-    scene.add(plank);
-  }
+  // 실사 라미네이트 마루 (Poly Haven laminate_floor_02, 실측 스케일 반복)
+  const floor = new THREE.Mesh(
+    new THREE.BoxGeometry(ROOM_HALF_X * 2, 0.2, ROOM_HALF_Z * 2),
+    floorMat(2.4, 1.9),
+  );
+  floor.position.set(0, -0.1, 0);
+  floor.receiveShadow = true;
+  scene.add(floor);
   const floorBody = world.createRigidBody(RigidBodyDesc.fixed().setTranslation(0, -0.25, 0));
   world.createCollider(ColliderDesc.cuboid(ROOM_HALF_X, 0.25, ROOM_HALF_Z).setFriction(0.9), floorBody);
 }
 
 function buildWallsAndCeiling(scene: THREE.Scene, world: World): void {
-  const lowerMat = toonMaterial(0xbcd9e8); // 하단: 파스텔 블루
-  const upperMat = toonMaterial(0xf6eedd); // 상단: 크림
-  const trimMat = toonMaterial(0xffffff);
+  const lowerMat = wallMat(0xaccfe2, 4, 1.6); // 하단: 파스텔 블루
+  const upperMat = wallMat(0xf3ead7, 4, 2.6); // 상단: 크림
+  const trimMat = painted(0xffffff, 0.5);
 
   const walls: { size: [number, number, number]; pos: [number, number, number] }[] = [
     { size: [ROOM_HALF_X * 2, WALL_HEIGHT, 1], pos: [0, WALL_HEIGHT / 2, -ROOM_HALF_Z] },
@@ -157,7 +153,7 @@ function buildWallsAndCeiling(scene: THREE.Scene, world: World): void {
   // 천장 — 그림자를 만들지 않아 "창문 햇살"이 방 안까지 들어온다
   const ceiling = new THREE.Mesh(
     new THREE.BoxGeometry(ROOM_HALF_X * 2, 0.5, ROOM_HALF_Z * 2),
-    toonMaterial(0xfaf5ea),
+    painted(0xfaf5ea, 0.9),
   );
   ceiling.position.set(0, WALL_HEIGHT + 0.25, 0);
   scene.add(ceiling);
@@ -176,7 +172,7 @@ function buildWindowsAndCurtains(scene: THREE.Scene): void {
     sun.position.set(6, 4.5, 0.05);
     g.add(sun);
 
-    const frameMat = toonMaterial(0xffffff);
+    const frameMat = painted(0xffffff, 0.45);
     const bars: [number, number, number, number][] = [
       [21.6, 1.2, 0, 7.9],
       [21.6, 1.2, 0, -7.9],
@@ -196,12 +192,12 @@ function buildWindowsAndCurtains(scene: THREE.Scene): void {
     g.add(sill);
 
     if (withCurtain) {
-      const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 27, 10), toonMaterial(TOY_COLORS.wood));
+      const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 27, 10), woodMat(TOY_COLORS.wood));
       rod.rotation.z = Math.PI / 2;
       rod.position.set(0, 9.6, 0.9);
       g.add(rod);
       for (const side of [-1, 1]) {
-        const curtain = new THREE.Mesh(new THREE.BoxGeometry(3.4, 21, 1), toonMaterial(0xf3b6c8));
+        const curtain = new THREE.Mesh(new THREE.BoxGeometry(3.4, 21, 1), plaidMat(0xffffff, 1.5));
         curtain.position.set(side * 12.2, -1, 0.8);
         g.add(curtain);
       }
@@ -221,20 +217,20 @@ function buildWindowsAndCurtains(scene: THREE.Scene): void {
 function buildDoor(scene: THREE.Scene): void {
   // 앞벽의 거대한 방문 (장식 — 벽에 밀착)
   const g = new THREE.Group();
-  const door = new THREE.Mesh(new THREE.BoxGeometry(17, 38, 0.8), toonMaterial(0xffffff));
+  const door = new THREE.Mesh(new THREE.BoxGeometry(17, 38, 0.8), painted(0xffffff, 0.5));
   door.position.set(0, 19, 0);
   g.add(door);
-  const frame = new THREE.Mesh(new THREE.BoxGeometry(19, 39.5, 0.6), toonMaterial(0xe8dcc8));
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(19, 39.5, 0.6), painted(0xe8dcc8));
   frame.position.set(0, 19.5, -0.2);
   g.add(frame);
   // 문 패널 홈
   for (const [py, ph] of [[27, 12], [12, 14]] as const) {
-    const panel = new THREE.Mesh(new THREE.BoxGeometry(11, ph, 0.5), toonMaterial(0xf2ece0));
+    const panel = new THREE.Mesh(new THREE.BoxGeometry(11, ph, 0.5), painted(0xf2ece0));
     panel.position.set(0, py, 0.3);
     g.add(panel);
   }
   // 문고리 — 작아진 사람에겐 아득히 높다
-  const knob = new THREE.Mesh(new THREE.SphereGeometry(1.1, 14, 10), toonMaterial(0xd8b64a));
+  const knob = new THREE.Mesh(new THREE.SphereGeometry(1.1, 14, 10), new THREE.MeshStandardMaterial({ color: 0xd8b64a, metalness: 0.85, roughness: 0.35 }));
   knob.position.set(-6.5, 18, 0.9);
   g.add(knob);
 
@@ -251,7 +247,7 @@ function buildRug(scene: THREE.Scene): void {
     [5, 0xf6f0e4],
   ];
   rings.forEach(([r, c], i) => {
-    const ring = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.06 + i * 0.015, 48), toonMaterial(c));
+    const ring = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.06 + i * 0.015, 48), fabricMat(c, 7));
     ring.position.set(2, 0.04 + i * 0.008, 8);
     ring.receiveShadow = true;
     scene.add(ring);
@@ -270,25 +266,25 @@ function buildBed(scene: THREE.Scene, world: World): void {
 
   // 다리 4개
   for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
-    addStaticBox(scene, world, [2.4, legH, 2.4], [cx + sx * (W / 2 - 1.5), legH / 2, cz + sz * (L / 2 - 1.5)], TOY_COLORS.woodDark);
+    addStaticBox(scene, world, [2.4, legH, 2.4], [cx + sx * (W / 2 - 1.5), legH / 2, cz + sz * (L / 2 - 1.5)], woodMat(0xcfa878, 1.5));
   }
   // 프레임 + 매트리스 (콜라이더는 하나로 합침)
-  decoBox(scene, [W, 3, L], [cx, legH + 1.5, cz], TOY_COLORS.woodDark);
-  decoBox(scene, [W - 0.6, 3, L - 0.8], [cx, legH + 4.2, cz], 0xf7f3ea);
+  decoBox(scene, [W, 3, L], [cx, legH + 1.5, cz], woodMat(0xcfa878, 3));
+  decoBox(scene, [W - 0.6, 3, L - 0.8], [cx, legH + 4.2, cz], fabricMat(0xf7f3ea, 4));
   const bedBody = world.createRigidBody(RigidBodyDesc.fixed().setTranslation(cx, legH + 2.9, cz));
   world.createCollider(ColliderDesc.cuboid(W / 2, 2.9, L / 2).setFriction(0.8), bedBody);
 
   // 이불 (발치 쪽 절반)
-  decoBox(scene, [W + 0.8, 1.6, 20], [cx, legH + 5.9, cz + 8.5], TOY_COLORS.teal);
-  decoBox(scene, [W + 0.8, 6, 1.6], [cx, legH + 3.4, cz + 18.5], TOY_COLORS.teal); // 늘어진 자락
+  decoBox(scene, [W + 0.8, 1.6, 20], [cx, legH + 5.9, cz + 8.5], fabricMat(TOY_COLORS.teal, 3));
+  decoBox(scene, [W + 0.8, 6, 1.6], [cx, legH + 3.4, cz + 18.5], fabricMat(TOY_COLORS.teal, 3)); // 늘어진 자락
   // 베개
-  const pillow = new THREE.Mesh(new THREE.BoxGeometry(10, 2.4, 6), toonMaterial(0xfef9ee));
+  const pillow = new THREE.Mesh(new THREE.BoxGeometry(10, 2.4, 6), fabricMat(0xfef9ee, 2));
   pillow.position.set(cx, legH + 6.4, cz - 14);
   pillow.rotation.y = 0.08;
   pillow.castShadow = true;
   scene.add(pillow);
   // 헤드보드
-  decoBox(scene, [W, 12, 1.6], [cx, legH + 7, cz - L / 2 + 0.4], TOY_COLORS.woodDark);
+  decoBox(scene, [W, 12, 1.6], [cx, legH + 7, cz - L / 2 + 0.4], woodMat(0xcfa878, 3));
 }
 
 function buildDeskAndChair(scene: THREE.Scene, world: World): void {
@@ -296,19 +292,19 @@ function buildDeskAndChair(scene: THREE.Scene, world: World): void {
   const cx = 38.5;
   const cz = -14;
   const topY = 14;
-  addStaticBox(scene, world, [12.5, 1.2, 25], [cx, topY + 0.6, cz], TOY_COLORS.wood);
+  addStaticBox(scene, world, [12.5, 1.2, 25], [cx, topY + 0.6, cz], woodMat(0xe2b586, 3));
   for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
-    addStaticBox(scene, world, [1.4, topY, 1.4], [cx + sx * 5, topY / 2, cz + sz * 11.3], TOY_COLORS.woodDark);
+    addStaticBox(scene, world, [1.4, topY, 1.4], [cx + sx * 5, topY / 2, cz + sz * 11.3], woodMat(0xb98e62, 1.5));
   }
   // 책상 위 소품 (장식): 책 더미 + 연필꽂이
   decoBox(scene, [7, 1, 5], [cx - 1, topY + 1.7, cz - 6], TOY_COLORS.red);
   decoBox(scene, [6, 1, 4.4], [cx - 0.6, topY + 2.7, cz - 5.7], TOY_COLORS.blue, 0.15);
-  const cup = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.3, 3, 14), toonMaterial(TOY_COLORS.purple));
+  const cup = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.3, 3, 14), plastic(TOY_COLORS.purple));
   cup.position.set(cx + 2, topY + 2.7, cz + 6);
   cup.castShadow = true;
   scene.add(cup);
   for (let i = 0; i < 3; i++) {
-    const pen = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 4.5, 8), toonMaterial([TOY_COLORS.red, TOY_COLORS.green, TOY_COLORS.yellow][i]));
+    const pen = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 4.5, 8), plastic([TOY_COLORS.red, TOY_COLORS.green, TOY_COLORS.yellow][i]));
     pen.position.set(cx + 1.4 + i * 0.6, topY + 4.2, cz + 5.6 + (i % 2) * 0.7);
     pen.rotation.z = 0.12 * (i - 1);
     scene.add(pen);
@@ -333,11 +329,11 @@ function buildBookshelf(scene: THREE.Scene, world: World): void {
   const D = 5;
 
   // 측판/뒤판/선반 — 비주얼
-  decoBox(scene, [1.2, H, D], [cx - W / 2, H / 2, cz], TOY_COLORS.wood);
-  decoBox(scene, [1.2, H, D], [cx + W / 2, H / 2, cz], TOY_COLORS.wood);
-  decoBox(scene, [W, 1.2, D], [cx, H - 0.6, cz], TOY_COLORS.wood);
+  decoBox(scene, [1.2, H, D], [cx - W / 2, H / 2, cz], woodMat(0xdcb587, 2));
+  decoBox(scene, [1.2, H, D], [cx + W / 2, H / 2, cz], woodMat(0xdcb587, 2));
+  decoBox(scene, [W, 1.2, D], [cx, H - 0.6, cz], woodMat(0xdcb587, 2));
   for (const shelfY of [0.6, 11, 21.5]) {
-    decoBox(scene, [W - 1, 1.2, D], [cx, shelfY, cz], TOY_COLORS.wood);
+    decoBox(scene, [W - 1, 1.2, D], [cx, shelfY, cz], woodMat(0xdcb587, 2));
   }
   // 꽂힌 책들 (선반 위 색색 박스)
   const bookColors = [TOY_COLORS.red, TOY_COLORS.blue, TOY_COLORS.green, TOY_COLORS.orange, TOY_COLORS.purple, TOY_COLORS.teal];
@@ -355,7 +351,7 @@ function buildBookshelf(scene: THREE.Scene, world: World): void {
     }
   }
   // 맨 위 곰인형 (구체 조합)
-  const bearMat = toonMaterial(0xb98a5a);
+  const bearMat = fabricMat(0xb98a5a, 4);
   const bear = new THREE.Group();
   const bodyS = new THREE.Mesh(new THREE.SphereGeometry(2.6, 16, 12), bearMat);
   const headS = new THREE.Mesh(new THREE.SphereGeometry(1.8, 16, 12), bearMat);
@@ -364,7 +360,7 @@ function buildBookshelf(scene: THREE.Scene, world: World): void {
   earL.position.set(-1.3, 4.8, 0);
   const earR = earL.clone();
   earR.position.x = 1.3;
-  const snout = new THREE.Mesh(new THREE.SphereGeometry(0.8, 10, 8), toonMaterial(0xdec098));
+  const snout = new THREE.Mesh(new THREE.SphereGeometry(0.8, 10, 8), fabricMat(0xdec098, 4));
   snout.position.set(0, 3.1, 1.5);
   bear.add(bodyS, headS, earL, earR, snout);
   bear.position.set(cx - 5, H + 2.4, cz);
@@ -385,13 +381,13 @@ function buildWardrobe(scene: THREE.Scene, world: World): void {
   decoBox(scene, [0.6, 37, 8.2], [cx - 5.1, 19.5, cz - 4.4], 0xe7dcc6);
   decoBox(scene, [0.6, 37, 8.2], [cx - 5.1, 19.5, cz + 4.4], 0xe7dcc6);
   for (const s of [-1, 1]) {
-    const knob = new THREE.Mesh(new THREE.SphereGeometry(0.6, 10, 8), toonMaterial(0xd8b64a));
+    const knob = new THREE.Mesh(new THREE.SphereGeometry(0.6, 10, 8), new THREE.MeshStandardMaterial({ color: 0xd8b64a, metalness: 0.85, roughness: 0.35 }));
     knob.position.set(cx - 5.6, 19, cz + s * 1.2);
     scene.add(knob);
   }
   // 위에 얹힌 모자 상자
   decoBox(scene, [7, 3.5, 7], [cx - 0.5, 41.8, cz - 3], TOY_COLORS.pink);
-  const lid = new THREE.Mesh(new THREE.CylinderGeometry(4.2, 4.2, 1.2, 20), toonMaterial(TOY_COLORS.purple));
+  const lid = new THREE.Mesh(new THREE.CylinderGeometry(4.2, 4.2, 1.2, 20), painted(TOY_COLORS.purple));
   lid.position.set(cx - 0.5, 44, cz - 3);
   lid.castShadow = true;
   scene.add(lid);
@@ -405,7 +401,7 @@ function buildToyBoxOnSide(scene: THREE.Scene, world: World): void {
   const H = 12; // 개구부 높이
   const D = 11; // 깊이
   const T = 1.2;
-  const mat = toonMaterial(0xe8b04b);
+  const mat = painted(0xe8b04b, 0.6);
 
   // 바닥판(수직, 뒤쪽) / 좌우 측판 / 위판
   addStaticBox(scene, world, [W, H, T], [cx, H / 2, cz + D / 2], mat);
@@ -457,7 +453,7 @@ function buildFloorClutter(scene: THREE.Scene, world: World): void {
       ctx.textBaseline = 'middle';
       ctx.fillText(letters[i], 64, 70);
     });
-    const mat = new THREE.MeshToonMaterial({ map: tex });
+    const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.55 });
     addStaticBox(scene, world, [3, 3, 3], [x, y, z], mat, rotY);
   });
 
@@ -469,9 +465,9 @@ function buildFloorClutter(scene: THREE.Scene, world: World): void {
     const len = 3.2;
     const r = 0.34;
     const g = new THREE.Group();
-    const bodyMesh = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 12), toonMaterial(c));
+    const bodyMesh = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 12), plastic(c));
     g.add(bodyMesh);
-    const tip = new THREE.Mesh(new THREE.ConeGeometry(r, 0.8, 12), toonMaterial(c));
+    const tip = new THREE.Mesh(new THREE.ConeGeometry(r, 0.8, 12), plastic(c));
     tip.position.y = len / 2 + 0.4;
     g.add(tip);
     const angle = i * 0.8 - 0.6;
@@ -494,13 +490,13 @@ function buildFloorClutter(scene: THREE.Scene, world: World): void {
   // 바닥에 펼쳐진 그림책
   const openBook = new THREE.Group();
   for (const s of [-1, 1]) {
-    const page = new THREE.Mesh(new THREE.BoxGeometry(5.5, 0.5, 7.5), toonMaterial(0xfdfbf4));
+    const page = new THREE.Mesh(new THREE.BoxGeometry(5.5, 0.5, 7.5), painted(0xfdfbf4, 0.85));
     page.position.set(s * 2.7, 0.45, 0);
     page.rotation.z = s * -0.12;
     page.castShadow = true;
     openBook.add(page);
   }
-  const cover = new THREE.Mesh(new THREE.BoxGeometry(11.6, 0.35, 8), toonMaterial(TOY_COLORS.green));
+  const cover = new THREE.Mesh(new THREE.BoxGeometry(11.6, 0.35, 8), painted(TOY_COLORS.green, 0.7));
   cover.position.y = 0.18;
   openBook.add(cover);
   openBook.position.set(-2, 0, -24);
@@ -518,12 +514,12 @@ function buildPencil(scene: THREE.Scene, world: World, x: number, z: number, rot
   const len = 3.6;
   const r = 0.2;
   const g = new THREE.Group();
-  const bodyMesh = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 6), toonMaterial(TOY_COLORS.yellow));
+  const bodyMesh = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 6), plastic(TOY_COLORS.yellow));
   g.add(bodyMesh);
-  const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.02, r, 0.5, 6), toonMaterial(TOY_COLORS.wood));
+  const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.02, r, 0.5, 6), woodMat(TOY_COLORS.wood));
   tip.position.y = -len / 2 - 0.25;
   g.add(tip);
-  const eraser = new THREE.Mesh(new THREE.CylinderGeometry(r * 1.05, r * 1.05, 0.3, 10), toonMaterial(TOY_COLORS.pink));
+  const eraser = new THREE.Mesh(new THREE.CylinderGeometry(r * 1.05, r * 1.05, 0.3, 10), painted(TOY_COLORS.pink, 0.9));
   eraser.position.y = len / 2 + 0.15;
   g.add(eraser);
   g.rotation.z = Math.PI / 2;
@@ -635,7 +631,7 @@ function buildPosters(scene: THREE.Scene): void {
 function buildOutletAndSwitch(scene: THREE.Scene): void {
   // 콘센트 — 작아진 사람 눈높이 근처에 있는 스케일 단서
   const outlet = new THREE.Group();
-  const plate = new THREE.Mesh(new THREE.BoxGeometry(3.4, 5, 0.5), toonMaterial(0xffffff));
+  const plate = new THREE.Mesh(new THREE.BoxGeometry(3.4, 5, 0.5), plastic(0xffffff));
   outlet.add(plate);
   for (const dy of [1.1, -1.1]) {
     const hole = new THREE.Mesh(new THREE.CircleGeometry(0.75, 14), new THREE.MeshBasicMaterial({ color: 0x3a3a40 }));
@@ -648,9 +644,9 @@ function buildOutletAndSwitch(scene: THREE.Scene): void {
 
   // 전등 스위치 (문 옆, 실제 1.2m 높이 ≈ 23유닛)
   const sw = new THREE.Group();
-  const swPlate = new THREE.Mesh(new THREE.BoxGeometry(3, 4.4, 0.5), toonMaterial(0xffffff));
+  const swPlate = new THREE.Mesh(new THREE.BoxGeometry(3, 4.4, 0.5), plastic(0xffffff));
   sw.add(swPlate);
-  const toggle = new THREE.Mesh(new THREE.BoxGeometry(1, 1.8, 0.8), toonMaterial(0xe8e2d4));
+  const toggle = new THREE.Mesh(new THREE.BoxGeometry(1, 1.8, 0.8), plastic(0xe8e2d4));
   toggle.position.z = 0.4;
   sw.add(toggle);
   sw.position.set(-31, 23, ROOM_HALF_Z - 1.2);
@@ -660,10 +656,10 @@ function buildOutletAndSwitch(scene: THREE.Scene): void {
 
 function buildCeilingLamp(scene: THREE.Scene): void {
   const g = new THREE.Group();
-  const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 9, 8), toonMaterial(0x4a4a52));
+  const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 9, 8), painted(0x4a4a52, 0.6));
   cord.position.y = -4.5;
   g.add(cord);
-  const shade = new THREE.Mesh(new THREE.ConeGeometry(6, 5, 24, 1, true), toonMaterial(TOY_COLORS.red));
+  const shade = new THREE.Mesh(new THREE.ConeGeometry(6, 5, 24, 1, true), new THREE.MeshStandardMaterial({ color: TOY_COLORS.red, roughness: 0.4, metalness: 0.5, side: THREE.DoubleSide }));
   shade.position.y = -11;
   g.add(shade);
   const bulb = new THREE.Mesh(

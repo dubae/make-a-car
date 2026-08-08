@@ -38,7 +38,7 @@ npm run preview   # 빌드 결과 로컬 확인
 
 ### 기술 스택
 
-- **렌더링**: [Three.js](https://threejs.org/) — 토온 셰이딩으로 토이스토리 느낌의 그래픽
+- **렌더링**: [Three.js](https://threejs.org/) — PBR(물리 기반 렌더링) + ACES 톤매핑 + HDRI 환경광. 바닥/벽/직물/콘크리트/원목은 [Poly Haven](https://polyhaven.com/)의 CC0 실사 텍스처 사용
 - **물리**: [Rapier](https://rapier.rs/) (WASM) — 파츠 강체 시뮬레이션, 캐릭터 컨트롤러, 이후 차량 물리까지 동일 엔진 사용
 - **빌드**: Vite + TypeScript
 

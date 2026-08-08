@@ -6,6 +6,7 @@ import { PhaseManager } from '../game/PhaseManager';
 import { buildToyRoom } from '../world/ToyRoomMap';
 import { spawnToyParts, ToyPart } from '../world/ToyParts';
 import { Garage } from '../world/Garage';
+import { loadAssets, environment } from '../world/assets';
 import { PlayerController } from '../player/PlayerController';
 import { Grabber } from '../player/Grabber';
 
@@ -17,17 +18,17 @@ export class Game {
   private renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
   private camera: THREE.PerspectiveCamera;
-  private world: World;
+  private world!: World;
 
-  private input: Input;
+  private input!: Input;
   private hud = new Hud();
   private phase = new PhaseManager();
 
-  private parts: ToyPart[];
+  private parts!: ToyPart[];
   private partsByCollider = new Map<number, ToyPart>();
-  private garage: Garage;
-  private player: PlayerController;
-  private grabber: Grabber;
+  private garage!: Garage;
+  private player!: PlayerController;
+  private grabber!: Grabber;
 
   private lastTime = 0;
 
@@ -39,7 +40,7 @@ export class Game {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 0.85;
+    this.renderer.toneMappingExposure = 0.95;
     document.body.appendChild(this.renderer.domElement);
 
     this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 300);
@@ -53,6 +54,14 @@ export class Game {
 
     // --- 조명 ---
     this.setupLights();
+  }
+
+  /** PBR 텍스처/HDRI 로드 후 월드를 구축한다 (렌더링 시작 전 1회) */
+  async init(): Promise<void> {
+    await loadAssets(this.renderer);
+    // HDRI 환경맵 — 부드러운 실내 간접광과 재질 반사
+    this.scene.environment = environment();
+    this.scene.environmentIntensity = 0.55;
 
     // --- 물리 월드 + 맵 ---
     this.world = new World({ x: 0, y: -9.81, z: 0 });
@@ -85,7 +94,7 @@ export class Game {
   }
 
   private setupLights(): void {
-    const hemi = new THREE.HemisphereLight(0xcfe8ff, 0xffe0b8, 0.4);
+    const hemi = new THREE.HemisphereLight(0xcfe8ff, 0xffe0b8, 0.15);
     this.scene.add(hemi);
 
     // 창문(뒷벽) 쪽에서 들어오는 오후 햇살
@@ -101,7 +110,7 @@ export class Game {
     sun.shadow.bias = -0.0004;
     this.scene.add(sun);
 
-    const fill = new THREE.AmbientLight(0xffffff, 0.15);
+    const fill = new THREE.AmbientLight(0xffffff, 0.06);
     this.scene.add(fill);
   }
 
