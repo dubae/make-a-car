@@ -56,7 +56,10 @@ export class Grabber {
     this.updateHover();
 
     const grabPressed = input.clicked(0) || input.justPressed('KeyE');
-    const throwPressed = input.clicked(2) || input.justPressed('KeyQ');
+    const rmb = input.clicked(2);
+    // 조립 모드에서 우클릭은 부착, 던지기는 Q. 파밍 모드에서는 우클릭=던지기 유지
+    const attachPressed = this.assembly ? rmb : false;
+    const throwPressed = input.justPressed('KeyQ') || (!this.assembly && rmb);
 
     if (this.held) {
       this.updateCandidate();
@@ -64,10 +67,18 @@ export class Grabber {
       if (throwPressed) {
         this.clearCandidate();
         this.throwHeld();
+      } else if (attachPressed && this.candidate) {
+        this.weldHeld();
       } else if (grabPressed) {
-        if (this.assembly && this.candidate) this.weldHeld();
-        else this.release();
+        this.release();
       } else {
+        // 들고 있는 파츠도 R로 분해 (클러스터에서 떼어내 단독으로 든다)
+        if (this.assembly && input.justPressed('KeyR') && this.assembly.isBonded(this.held)) {
+          this.assembly.detach(this.held);
+          this.holdRotation = snapQuaternionTo90(
+            new THREE.Quaternion().copy(this.held.body.rotation() as THREE.Quaternion),
+          );
+        }
         this.moveHeld(dt);
       }
     } else if (grabPressed && this.hovered) {
@@ -142,9 +153,11 @@ export class Grabber {
     // 큰 파츠는 좀 더 멀리 들어서 시야를 가리지 않게
     this.holdDistance = Math.min(2.1 + part.boundingRadius, 4);
     // 조립 모드: 잡는 순간 가장 가까운 90° 정렬로 스냅 → 반듯하게 붙이기 쉬움
-    this.holdRotation = this.assembly
-      ? snapQuaternionTo90(new THREE.Quaternion().copy(part.body.rotation() as THREE.Quaternion))
-      : null;
+    // (이미 용접된 파츠는 클러스터째 끌기만 하므로 회전 구동 없음)
+    this.holdRotation =
+      this.assembly && !this.assembly.isBonded(part)
+        ? snapQuaternionTo90(new THREE.Quaternion().copy(part.body.rotation() as THREE.Quaternion))
+        : null;
   }
 
   /** 바라보는 시점 기준 90° 회전: Z=가로 스핀, X=앞뒤로 눕히기, C=시계방향 굴리기 */
@@ -172,6 +185,21 @@ export class Grabber {
     // 벽 반대편 등으로 너무 멀어지면 놓친다
     if (delta.length() > BREAK_DISTANCE) {
       this.release();
+      return;
+    }
+
+    // 용접된 클러스터를 들었을 때: 한 몸체에만 속도를 강제하면 조인트가 요동치며
+    // 발작하듯 회전/튕김이 발생한다 → 클러스터 전체에 같은 속도를 걸어 강체처럼 이동
+    const cluster =
+      this.assembly && this.assembly.isBonded(part) ? this.assembly.clusterOf(part) : null;
+    if (cluster) {
+      const vel = delta.multiplyScalar(7);
+      if (vel.length() > 9) vel.setLength(9);
+      for (const p of cluster) {
+        p.body.setLinvel({ x: vel.x, y: vel.y, z: vel.z }, true);
+        const av = p.body.angvel();
+        p.body.setAngvel({ x: av.x * 0.7, y: av.y * 0.7, z: av.z * 0.7 }, true);
+      }
       return;
     }
 

@@ -44,20 +44,41 @@ export class Assembly {
     return this.bonds.some((b) => b.a === part || b.b === part);
   }
 
-  /** 들고 있는 파츠 근처의 부착 후보 (같은 클러스터 제외) */
+  /**
+   * 들고 있는 파츠 근처의 부착 후보 (같은 클러스터 제외).
+   * 파츠별 부착 스피어들끼리 표면 간격을 재므로 모터의 축처럼
+   * 몸체 중심에서 벗어난 돌출부에도 정확히 판정된다.
+   */
   findCandidate(held: ToyPart, parts: ToyPart[]): ToyPart | null {
     const cluster = this.clusterOf(held);
-    const th = held.body.translation();
+    const heldSpheres = held.worldAttachSpheres();
     let best: ToyPart | null = null;
     let bestGap = SNAP_GAP;
     for (const p of parts) {
       if (cluster.has(p)) continue;
-      const tp = p.body.translation();
-      const gap =
-        Math.hypot(tp.x - th.x, tp.y - th.y, tp.z - th.z) - p.boundingRadius - held.boundingRadius;
-      if (gap < bestGap) {
-        bestGap = gap;
-        best = p;
+      for (const ts of p.worldAttachSpheres()) {
+        for (const hs of heldSpheres) {
+          const gap = ts.center.distanceTo(hs.center) - ts.radius - hs.radius;
+          if (gap < bestGap) {
+            bestGap = gap;
+            best = p;
+          }
+        }
+      }
+    }
+    return best;
+  }
+
+  /** held에서 가장 가까운 target의 부착 스피어 중심 (용접 캐스트 방향) */
+  private nearestAttachPoint(from: THREE.Vector3, target: ToyPart): THREE.Vector3 {
+    const spheres = target.worldAttachSpheres();
+    let best = spheres[0].center;
+    let bestD = Infinity;
+    for (const s of spheres) {
+      const d = from.distanceTo(s.center) - s.radius;
+      if (d < bestD) {
+        bestD = d;
+        best = s.center;
       }
     }
     return best;
@@ -66,10 +87,12 @@ export class Assembly {
   /** held를 target 표면까지 스냅한 뒤 고정 조인트로 용접 */
   weld(held: ToyPart, target: ToyPart): void {
     const th = held.body.translation();
-    const tt = target.body.translation();
-    const dir = new THREE.Vector3(tt.x - th.x, tt.y - th.y, tt.z - th.z);
+    const from = new THREE.Vector3(th.x, th.y, th.z);
+    // 가장 가까운 부착 지점(모터 축 등)을 향해 스냅 캐스트
+    const toward = this.nearestAttachPoint(from, target);
+    const dir = toward.clone().sub(from);
     const maxDist = dir.length();
-    const anchor = new THREE.Vector3((th.x + tt.x) / 2, (th.y + tt.y) / 2, (th.z + tt.z) / 2);
+    const anchor = from.clone().add(toward).multiplyScalar(0.5);
 
     if (maxDist > 1e-3) {
       dir.normalize();
@@ -89,18 +112,13 @@ export class Assembly {
         (collider) => collider.parent()?.handle === target.body.handle,
       );
       if (hit) {
-        const h = hit as unknown as {
-          toi?: number;
-          timeOfImpact?: number;
-          witness2?: { x: number; y: number; z: number };
-        };
-        const toi = h.timeOfImpact ?? h.toi ?? 0;
+        // rapier3d-compat 0.14의 필드명은 time_of_impact (witness는 로컬 좌표라 사용하지 않음)
+        const h = hit as unknown as { time_of_impact?: number; timeOfImpact?: number; toi?: number };
+        const toi = h.time_of_impact ?? h.timeOfImpact ?? h.toi ?? 0;
         const move = Math.max(0, toi - 0.02);
-        held.body.setTranslation(
-          { x: th.x + dir.x * move, y: th.y + dir.y * move, z: th.z + dir.z * move },
-          true,
-        );
-        if (h.witness2) anchor.set(h.witness2.x, h.witness2.y, h.witness2.z);
+        const snapped = from.clone().addScaledVector(dir, move);
+        held.body.setTranslation({ x: snapped.x, y: snapped.y, z: snapped.z }, true);
+        anchor.copy(snapped).add(toward).multiplyScalar(0.5);
       }
     }
 

@@ -119,6 +119,12 @@ export interface PartInfo {
 
 export type HighlightMode = 'none' | 'hover' | 'held' | 'target';
 
+/** 부착 판정용 스피어 (로컬 오프셋 + 반지름). 모터처럼 비대칭 파츠는 여러 개를 가진다 */
+export interface AttachSphere {
+  offset: THREE.Vector3;
+  radius: number;
+}
+
 const HIGHLIGHT_EMISSIVE: Record<HighlightMode, number> = {
   none: 0x000000,
   hover: 0x554400, // 시선 대상 (노랑)
@@ -131,6 +137,7 @@ export class ToyPart {
   /** 들고 다닐 때 카메라와의 거리 계산에 쓰는 대략적 반지름 */
   readonly boundingRadius: number;
   readonly colliderHandles: number[];
+  readonly attachSpheres: AttachSphere[];
   private emissiveMats: THREE.MeshStandardMaterial[] = [];
 
   constructor(
@@ -139,15 +146,28 @@ export class ToyPart {
     public readonly body: RigidBody,
     colliderHandles: number | number[],
     public readonly info: PartInfo,
+    attachSpheres?: AttachSphere[],
   ) {
     this.colliderHandles = Array.isArray(colliderHandles) ? colliderHandles : [colliderHandles];
     const s = new THREE.Box3().setFromObject(mesh).getSize(new THREE.Vector3());
     this.boundingRadius = Math.max(s.x, s.y, s.z) / 2;
+    this.attachSpheres = attachSpheres ?? [{ offset: new THREE.Vector3(), radius: this.boundingRadius }];
     mesh.traverse((o) => {
       if (o instanceof THREE.Mesh && 'emissive' in (o.material as THREE.Material)) {
         this.emissiveMats.push(o.material as THREE.MeshStandardMaterial);
       }
     });
+  }
+
+  /** 부착 스피어들의 월드 좌표 */
+  worldAttachSpheres(): { center: THREE.Vector3; radius: number }[] {
+    const t = this.body.translation();
+    const r = this.body.rotation();
+    const quat = new THREE.Quaternion(r.x, r.y, r.z, r.w);
+    return this.attachSpheres.map((s) => ({
+      center: s.offset.clone().applyQuaternion(quat).add(new THREE.Vector3(t.x, t.y, t.z)),
+      radius: s.radius,
+    }));
   }
 
   setHighlight(mode: HighlightMode): void {

@@ -68,6 +68,7 @@ export class Game {
 
     // --- 물리 월드 + 맵 ---
     this.world = new World({ x: 0, y: -9.81, z: 0 });
+    this.world.numSolverIterations = 8; // 용접 조인트 안정화
     buildToyRoom(this.scene, this.world);
 
     this.garage = new Garage(this.scene, this.world, GARAGE_POS);
@@ -279,11 +280,15 @@ export class Game {
 
     if (held && candidate) {
       this.hud.setHint(
-        `<kbd>클릭</kbd> — <b style="color:#6ee76e">${candidate.name}</b>에 부착! · <kbd>Z</kbd>/<kbd>X</kbd>/<kbd>C</kbd> 회전`,
+        `<kbd>우클릭</kbd> — <b style="color:#6ee76e">${candidate.name}</b>에 부착! · <kbd>Z</kbd>/<kbd>X</kbd>/<kbd>C</kbd> 회전`,
+      );
+    } else if (held && this.assembly.isBonded(held)) {
+      this.hud.setHint(
+        `<b>${held.name}</b> (결합체 끌기) — <kbd>R</kbd> 이 파츠만 분해 · <kbd>클릭</kbd> 내려놓기`,
       );
     } else if (held) {
       this.hud.setHint(
-        `<b>${held.name}</b> — 가까이 대면 부착 · <kbd>Z</kbd>/<kbd>X</kbd>/<kbd>C</kbd> 90° 회전 · <kbd>클릭</kbd> 내려놓기`,
+        `<b>${held.name}</b> — <kbd>우클릭</kbd> 부착 · <kbd>Z</kbd>/<kbd>X</kbd>/<kbd>C</kbd> 90° 회전 · <kbd>클릭</kbd> 놓기`,
       );
     } else if (hovered && this.assembly.isBonded(hovered)) {
       this.hud.setHint(`<kbd>클릭</kbd>/<kbd>E</kbd> 들기 · <kbd>R</kbd> <b>${hovered.name}</b> 분해`);

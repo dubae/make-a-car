@@ -63,11 +63,17 @@ export function spawnMotors(scene: THREE.Scene, world: World, positions: THREE.V
       body,
     );
 
-    return new ToyPart('모터', group, body, [housingCol.handle, axleCol.handle], {
-      shape: 'motor',
-      size: [1.4, 1.1, 1.1],
-      color: 0x51678f,
-      isMotor: true,
-    });
+    return new ToyPart(
+      '모터',
+      group,
+      body,
+      [housingCol.handle, axleCol.handle],
+      { shape: 'motor', size: [1.4, 1.1, 1.1], color: 0x51678f, isMotor: true },
+      // 부착 판정: 하우징 + 축 끝 (축에도 바퀴를 붙일 수 있어야 함)
+      [
+        { offset: new THREE.Vector3(0, 0, 0), radius: 0.85 },
+        { offset: new THREE.Vector3(1.35, 0, 0), radius: 0.45 },
+      ],
+    );
   });
 }
