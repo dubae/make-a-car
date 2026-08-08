@@ -1,12 +1,14 @@
 import * as THREE from 'three';
-import RAPIER, { World, RigidBodyDesc, RevoluteImpulseJoint } from '@dimforge/rapier3d-compat';
+import RAPIER, { World, Ray, RigidBodyDesc, RevoluteImpulseJoint } from '@dimforge/rapier3d-compat';
 import type { Input } from '../core/Input';
 import { Assembly, createFixedJoint } from './Assembly';
 import type { ToyPart } from '../world/ToyParts';
 
 /** 모든 모터 동일 출력 — 파츠 무게·바퀴 모양이 성능을 가른다 */
 const WHEEL_SPEED = 38; // rad/s
-const WHEEL_TORQUE_FACTOR = 800;
+const WHEEL_TORQUE_FACTOR = 300;
+/** 스로틀 램프(rad/s²) — 순간 토크 반작용으로 차체가 뒤집히거나 떠오르는 것 방지 */
+const THROTTLE_RAMP = 28;
 const STEER_TORQUE = 26; // 차체 질량 비례 조향 토크 계수
 
 /** 출발 지점 (러그 중앙 — 어떤 크기의 차도 놓을 수 있는 공터) */
@@ -23,6 +25,8 @@ const GATE_POSITIONS: [number, number][] = [
 interface WheelDrive {
   joint: RevoluteImpulseJoint;
   sign: number;
+  /** 접지 판정용 바퀴 루트 파츠 */
+  part: ToyPart;
 }
 
 /**
@@ -45,6 +49,8 @@ export class RaceManager {
   private carParts: ToyPart[] = [];
   private root: ToyPart | null = null;
   private wheels: WheelDrive[] = [];
+  private wheelParts = new Set<ToyPart>();
+  private motorSpeed = 0;
   private q0 = new THREE.Quaternion();
   private lastForward = new THREE.Vector3(0, 0, -1);
   private camPos = new THREE.Vector3();
@@ -80,10 +86,13 @@ export class RaceManager {
     this.carParts = best;
     if (this.carParts.length === 0) return;
 
-    // 2) 루트(차체 기준): 본드가 가장 많은 파츠, 동률이면 무거운 것
+    // 2) 루트(차체 기준): 모터가 아닌 파츠 중 본드가 가장 많은 것 (동률이면 무거운 것).
+    //    모터는 무거워서 질량 기준으로 뽑으면 차체가 모터가 되어버린다.
     const bondCount = (p: ToyPart) =>
       this.assembly.bonds.filter((b) => b.a === p || b.b === p).length;
-    this.root = this.carParts.reduce((r, p) => {
+    const nonMotor = this.carParts.filter((p) => !p.info.isMotor && bondCount(p) > 0);
+    const pool = nonMotor.length > 0 ? nonMotor : this.carParts;
+    this.root = pool.reduce((r, p) => {
       const bp = bondCount(p);
       const br = bondCount(r);
       if (bp !== br) return bp > br ? p : r;
@@ -115,13 +124,19 @@ export class RaceManager {
       const mBonds = this.assembly.bonds.filter((b) => b.a === motor || b.b === motor);
       if (mBonds.length === 0) continue;
       this.motorsUsed++;
-      // 모터를 제외했을 때 루트가 속한 성분이 차체 쪽 — 나머지 본드가 바퀴
-      for (const bond of [...mBonds]) {
+      const entries = [...mBonds].map((bond) => {
         const other = bond.a === motor ? bond.b : bond.a;
-        if (other === this.root) continue;
-        const comp = this.componentWithout(other, motor);
-        if (comp.has(this.root)) continue;
-        this.convertToWheel(motor, other, comp);
+        return { other, comp: this.componentWithout(other, motor) };
+      });
+      // 차체 쪽 = 루트가 속한 성분. 모터 자신이 루트라면 가장 큰 성분을 차체로 본다.
+      let chassisEntry: (typeof entries)[number] | null = null;
+      if (motor === this.root) {
+        chassisEntry = entries.reduce((a, b) => (b.comp.size > a.comp.size ? b : a));
+      }
+      for (const e of entries) {
+        if (e === chassisEntry) continue;
+        if (e.other === this.root || e.comp.has(this.root)) continue;
+        this.convertToWheel(motor, e.other, e.comp);
       }
     }
 
@@ -198,8 +213,30 @@ export class RaceManager {
     const d = driveDir.dot(new THREE.Vector3(0, 0, -1));
     const sign = Math.abs(d) < 0.2 ? 1 : -Math.sign(d);
 
-    this.wheels.push({ joint: rev, sign });
+    this.wheels.push({ joint: rev, sign, part: wheelRoot });
     this.wheelCount++;
+    for (const p of subtree) this.wheelParts.add(p); // 각속도 상한에서 제외 (바퀴는 빨리 돈다)
+  }
+
+  /** 바퀴가 지면(차 이외의 것)에 닿아 있는지 — 바퀴 중심에서 아래로 레이캐스트 */
+  private isWheelGrounded(wheel: ToyPart): boolean {
+    const t = wheel.body.translation();
+    const ray = new Ray({ x: t.x, y: t.y, z: t.z }, { x: 0, y: -1, z: 0 });
+    const carBodies = new Set(this.carParts.map((p) => p.body.handle));
+    const hit = this.world.castRay(
+      ray,
+      wheel.boundingRadius + 0.45,
+      true,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (collider) => {
+        const parent = collider.parent();
+        return parent ? !carBodies.has(parent.handle) : true;
+      },
+    );
+    return hit !== null;
   }
 
   private buildGates(): void {
@@ -221,6 +258,7 @@ export class RaceManager {
 
   /** 종료 시 모터 정지 */
   stop(): void {
+    this.motorSpeed = 0;
     for (const w of this.wheels) w.joint.configureMotorVelocity(0, WHEEL_TORQUE_FACTOR);
   }
 
@@ -240,9 +278,21 @@ export class RaceManager {
       (input.isDown('KeyA') || input.isDown('ArrowLeft') ? 1 : 0) -
       (input.isDown('KeyD') || input.isDown('ArrowRight') ? 1 : 0);
 
+    // 스로틀 램프 — 목표 속도로 서서히 (감속/정지는 2배 빠르게)
+    const targetSpeed = throttle * WHEEL_SPEED;
+    const slowing = Math.abs(targetSpeed) < Math.abs(this.motorSpeed);
+    const maxDelta = THROTTLE_RAMP * dt * (slowing ? 2.2 : 1);
+    this.motorSpeed += THREE.MathUtils.clamp(targetSpeed - this.motorSpeed, -maxDelta, maxDelta);
     for (const w of this.wheels) {
-      w.joint.configureMotorVelocity(throttle * WHEEL_SPEED * w.sign, WHEEL_TORQUE_FACTOR);
+      // 땅에 닿지 않은 바퀴는 출력 차단 — 공중에서 반작용 토크로
+      // 차체가 구르거나 떠오르는 것을 원천 방지
+      if (this.isWheelGrounded(w.part)) {
+        w.joint.configureMotorVelocity(this.motorSpeed * w.sign, WHEEL_TORQUE_FACTOR);
+      } else {
+        w.joint.configureMotorVelocity(0, 25);
+      }
     }
+
     if (steer !== 0) {
       this.root.body.applyTorqueImpulse(
         { x: 0, y: steer * this.totalMass * STEER_TORQUE * dt, z: 0 },
@@ -252,6 +302,17 @@ export class RaceManager {
     // 조향하지 않을 때 요 관성 감쇠
     const av = this.root.body.angvel();
     this.root.body.setAngvel({ x: av.x, y: av.y * 0.97, z: av.z }, true);
+
+    // 차체(바퀴 제외) 각속도 상한 — 공중에서 반작용으로 발작 회전하는 것 방지
+    for (const p of this.carParts) {
+      if (this.wheelParts.has(p)) continue;
+      const pav = p.body.angvel();
+      const len = Math.hypot(pav.x, pav.y, pav.z);
+      if (len > 7) {
+        const s = 7 / len;
+        p.body.setAngvel({ x: pav.x * s, y: pav.y * s, z: pav.z * s }, true);
+      }
+    }
 
     // --- 게이트 통과 판정 + 하이라이트 ---
     const t = this.root.body.translation();

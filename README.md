@@ -47,6 +47,8 @@ npm run build     # 타입체크 + 프로덕션 빌드 (dist/)
 npm run preview   # 빌드 결과 로컬 확인
 ```
 
+페이즈별 바로 테스트: `?p1=초&p2=초`(타이머 단축), `?phase=2`(재료가 준비된 조립부터), `?phase=3`(표준 4륜차로 바로 레이싱).
+
 ### 기술 스택
 
 - **렌더링**: [Three.js](https://threejs.org/) — PBR(물리 기반 렌더링) + ACES 톤매핑 + HDRI 환경광. 바닥/벽/직물/콘크리트/원목은 [Poly Haven](https://polyhaven.com/)의 CC0 실사 텍스처 사용

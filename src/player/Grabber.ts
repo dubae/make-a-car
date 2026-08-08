@@ -74,7 +74,9 @@ export class Grabber {
       } else {
         // 들고 있는 파츠도 R로 분해 (클러스터에서 떼어내 단독으로 든다)
         if (this.assembly && input.justPressed('KeyR') && this.assembly.isBonded(this.held)) {
+          this.setClusterGhost(this.held, false); // 떨어져 나갈 결합체의 고스트 상태 복원
           this.assembly.detach(this.held);
+          this.setClusterGhost(this.held, true); // 이제 단독이 된 파츠만 다시 고스트
           this.holdRotation = snapQuaternionTo90(
             new THREE.Quaternion().copy(this.held.body.rotation() as THREE.Quaternion),
           );
@@ -115,6 +117,7 @@ export class Grabber {
     this.held = null;
     this.holdRotation = null;
     part.setHighlight('none');
+    this.setClusterGhost(part, false);
     part.body.setGravityScale(1, true);
     this.assembly!.weld(part, target);
   }
@@ -144,12 +147,29 @@ export class Grabber {
     if (this.hovered && this.hovered !== prev) this.hovered.setHighlight('hover');
   }
 
+  /**
+   * 조립 모드에서 들고 있는 파츠(및 그 결합체)를 "고스트"로 전환:
+   * 센서 콜라이더가 되어 다른 물체를 밀거나 부딪히지 않는다.
+   */
+  private setClusterGhost(part: ToyPart, ghost: boolean): void {
+    if (!this.assembly) return;
+    const members = this.assembly.clusterOf(part);
+    for (const p of members) {
+      for (const h of p.colliderHandles) {
+        this.world.getCollider(h)?.setSensor(ghost);
+      }
+      p.body.setGravityScale(ghost ? 0 : 1, true);
+      p.body.wakeUp();
+    }
+  }
+
   private grab(part: ToyPart): void {
     this.held = part;
     this.hovered = null;
     part.setHighlight('held');
     part.body.setGravityScale(0, true);
     part.body.wakeUp();
+    this.setClusterGhost(part, true);
     // 큰 파츠는 좀 더 멀리 들어서 시야를 가리지 않게
     this.holdDistance = Math.min(2.1 + part.boundingRadius, 4);
     // 조립 모드: 잡는 순간 가장 가까운 90° 정렬로 스냅 → 반듯하게 붙이기 쉬움
@@ -239,6 +259,7 @@ export class Grabber {
     this.held = null;
     this.holdRotation = null;
     part.setHighlight('none');
+    this.setClusterGhost(part, false);
     part.body.setGravityScale(1, true);
     // 들고 있던 관성이 너무 크지 않게 절반으로
     const v = part.body.linvel();
@@ -251,6 +272,7 @@ export class Grabber {
     this.held = null;
     this.holdRotation = null;
     part.setHighlight('none');
+    this.setClusterGhost(part, false);
     part.body.setGravityScale(1, true);
     const dir = this.cameraForward();
     part.body.setLinvel(

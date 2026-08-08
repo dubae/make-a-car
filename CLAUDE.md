@@ -17,4 +17,4 @@ npm run typecheck  # 타입체크만
 - 물리 강체가 소스 오브 트루스 — Three 메시는 `syncMesh()`로 따라감.
 - UI 텍스트는 한국어. HUD는 DOM 오버레이 (index.html에 마크업, `src/ui/Hud.ts`에서 제어).
 - GitHub Pages 배포라 `vite.config.ts`의 `base: './'` 유지 필수.
-- 개발/시연 치트: URL에 `?p1=초&p2=초`로 페이즈 타이머 단축, 콘솔에서 `window.__game`으로 Game 인스턴스 접근 (E2E 테스트가 사용).
+- 개발/시연 치트: URL에 `?p1=초&p2=초`로 페이즈 타이머 단축, `?phase=2`(대표 파츠가 차고에 준비된 조립)·`?phase=3`(표준 4륜차 자동 조립 후 바로 레이싱)으로 페이즈 직행, 콘솔에서 `window.__game`으로 Game 인스턴스 접근 (E2E 테스트가 사용).

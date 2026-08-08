@@ -36,6 +36,9 @@ export class Game {
   private race: RaceManager | null = null;
 
   private lastTime = 0;
+  private accumulator = 0;
+  /** URL ?phase=2|3 — 해당 페이즈로 바로 진입 (테스트용) */
+  private debugPhase = 0;
 
   constructor() {
     // --- 렌더러 / 카메라 ---
@@ -89,12 +92,13 @@ export class Game {
     this.registerParts(this.parts);
     this.assembly = new Assembly(this.world);
 
-    // 개발/시연용 타이머 오버라이드 (예: ?p1=5&p2=30)
+    // 개발/시연용 타이머 오버라이드 (예: ?p1=5&p2=30) + 페이즈 직행 (?phase=2|3)
     const qp = new URLSearchParams(location.search);
     const p1 = Number(qp.get('p1'));
     const p2 = Number(qp.get('p2'));
     if (p1 > 0) this.phase.phase1Duration = p1;
     if (p2 > 0) this.phase.phase2Duration = p2;
+    this.debugPhase = Number(qp.get('phase')) || 0;
 
     // --- 플레이어 ---
     this.input = new Input(this.renderer.domElement);
@@ -146,6 +150,16 @@ export class Game {
   private wireUi(): void {
     this.hud.onStart = () => {
       this.hud.hideStart();
+      if (this.debugPhase >= 2) {
+        // 페이즈 직행: 대표 파츠들을 차고에 넣고 바로 조립/레이싱으로
+        this.stockGarageForDebug();
+        this.startPhase2();
+        if (this.debugPhase >= 3) {
+          this.buildDebugCar();
+          this.startPhase3();
+        }
+        return;
+      }
       this.phase.startPhase1();
       this.input.requestLock();
     };
@@ -186,6 +200,60 @@ export class Game {
     this.hud.showPause(false);
     const collected = this.garage.collect(this.parts);
     this.hud.showInterlude(collected.length, this.phase.phase2Duration);
+  }
+
+  /** (?phase=2|3) 대표 파츠 셋을 차고 안으로 옮겨 조립 테스트를 바로 시작할 수 있게 */
+  private stockGarageForDebug(): void {
+    const picks: [string, number][] = [
+      ['대형 차체 블록', 1],
+      ['장난감 바퀴', 6],
+      ['나무 판자', 2],
+      ['나무 블록', 2],
+      ['고무공', 2],
+      ['실패(스풀)', 2],
+    ];
+    const { x: cx, z: cz } = this.garage.center;
+    let i = 0;
+    for (const [name, count] of picks) {
+      for (const p of this.parts.filter((q) => q.name === name).slice(0, count)) {
+        // 차고 내부 판정 범위(|dx|≤6.7, z≤cz+4.9) 안에 들어오는 그리드
+        p.body.setTranslation(
+          { x: cx - 5 + (i % 5) * 2.5, y: 1.5, z: cz + 0.5 + Math.floor(i / 5) * 1.9 },
+          true,
+        );
+        p.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+        i++;
+      }
+    }
+  }
+
+  /** (?phase=3) 표준 4륜차를 자동 조립 — 차체 블록 + 모터 4 + 바퀴 4 */
+  private buildDebugCar(): void {
+    const block = this.parts.find((p) => p.name === '대형 차체 블록');
+    const motors = this.parts.filter((p) => p.info.isMotor);
+    const wheels = this.parts.filter((p) => p.name === '장난감 바퀴').slice(0, 4);
+    if (!block || motors.length < 4 || wheels.length < 4) return;
+
+    const { x: cx, z: cz } = this.garage.center;
+    const identity = { x: 0, y: 0, z: 0, w: 1 };
+    const yawPi = { x: 0, y: 1, z: 0, w: 0 };
+    const zRot90 = { x: 0, y: 0, z: Math.SQRT1_2, w: Math.SQRT1_2 };
+
+    const place = (p: ToyPart, x: number, z: number, rot: { x: number; y: number; z: number; w: number }) => {
+      p.body.setRotation(rot, true);
+      p.body.setTranslation({ x, y: 3, z }, true);
+      p.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      p.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    };
+    place(block, cx, cz, identity);
+    const mx = [cx + 1.8, cx + 1.8, cx - 1.8, cx - 1.8];
+    const mz = [cz - 1, cz + 1, cz - 1, cz + 1];
+    motors.forEach((m, i) => place(m, mx[i], mz[i], i < 2 ? identity : yawPi));
+    const wx = [cx + 3.75, cx + 3.75, cx - 3.75, cx - 3.75];
+    wheels.forEach((w, i) => place(w, wx[i], mz[i], zRot90));
+
+    for (const m of motors) this.assembly.weld(m, block);
+    wheels.forEach((w, i) => this.assembly.weld(w, motors[i]));
   }
 
   /** Phase 2 시작 — 차고로 이동, 셔터 닫기, 밖의 파츠 제거, 모터 4개 지급 */
@@ -275,8 +343,14 @@ export class Game {
         this.grabber.update(dt, this.input);
       }
 
-      this.world.timestep = dt;
-      this.world.step();
+      // 고정 타임스텝 — 가변 스텝은 접촉 잔진동(바닥 침투 떨림)의 원인
+      const FIXED = 1 / 60;
+      this.world.timestep = FIXED;
+      this.accumulator = Math.min(this.accumulator + dt, FIXED * 3);
+      while (this.accumulator >= FIXED) {
+        this.world.step();
+        this.accumulator -= FIXED;
+      }
 
       if (this.phase.phase !== 'phase3') this.player.syncCamera(this.camera);
       for (const p of this.parts) p.syncMesh();
