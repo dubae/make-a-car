@@ -16,15 +16,63 @@ const ROOF_RISE = 4.5;
 export class Garage {
   private arrow!: THREE.Mesh;
   private elapsed = 0;
+  private interiorLight!: THREE.PointLight;
+  private shutter: THREE.Group | null = null;
+  private shutterClosing = false;
 
   constructor(
-    scene: THREE.Scene,
+    private scene: THREE.Scene,
     private world: World,
     public readonly center: THREE.Vector3,
   ) {
     this.buildBuilding(scene);
     this.buildFloorMarkings(scene);
     this.buildSignAndBeacon(scene);
+  }
+
+  /** Phase 2 시작 시 플레이어가 서는 위치 (문 안쪽, 내부를 바라봄) */
+  interiorSpawnPoint(): THREE.Vector3 {
+    return new THREE.Vector3(this.center.x, 1.7, this.center.z - 3.4);
+  }
+
+  /** 기본 지급 모터 4개의 배치 위치 */
+  motorSpawnPoints(): THREE.Vector3[] {
+    const { x: cx, z: cz } = this.center;
+    return [
+      new THREE.Vector3(cx - 3.8, 1.3, cz + 4),
+      new THREE.Vector3(cx + 3.8, 1.3, cz + 4),
+      new THREE.Vector3(cx - 3.8, 1.3, cz + 0.8),
+      new THREE.Vector3(cx + 3.8, 1.3, cz + 0.8),
+    ];
+  }
+
+  /** 셔터 닫기 시작 (Phase 2 진입 연출) — 완전히 닫히면 콜라이더 생성 */
+  closeShutter(): void {
+    if (this.shutter) return;
+    const { x: cx, z: cz } = this.center;
+    const g = new THREE.Group();
+    const mat = new THREE.MeshStandardMaterial({ color: 0xd3d3d8, metalness: 0.55, roughness: 0.5 });
+    const H = 6.4;
+    const slats = 6;
+    for (let i = 0; i < slats; i++) {
+      const slat = new THREE.Mesh(new THREE.BoxGeometry(HALF_X * 2 - 2.4, H / slats - 0.07, 0.3), mat);
+      slat.position.y = H / slats / 2 + (i * H) / slats;
+      slat.castShadow = true;
+      g.add(slat);
+    }
+    g.position.set(cx, H, cz - HALF_Z + 0.55); // 헤더 위에서 시작해 아래로 내려온다
+    this.scene.add(g);
+    this.shutter = g;
+    this.shutterClosing = true;
+    this.interiorLight.intensity = 420; // 작업등 켜기
+  }
+
+  private finishShutter(): void {
+    const { x: cx, z: cz } = this.center;
+    const body = this.world.createRigidBody(
+      RigidBodyDesc.fixed().setTranslation(cx, 3.2, cz - HALF_Z + 0.55),
+    );
+    this.world.createCollider(ColliderDesc.cuboid(HALF_X - 1.2, 3.2, 0.15), body);
   }
 
   private wall(
@@ -129,9 +177,9 @@ export class Garage {
     scene.add(win);
 
     // 내부 조명
-    const light = new THREE.PointLight(0xffe2ae, 180, 0, 1.8);
-    light.position.set(cx, WALL_H - 2, cz + 1.5);
-    scene.add(light);
+    this.interiorLight = new THREE.PointLight(0xffe2ae, 180, 0, 1.8);
+    this.interiorLight.position.set(cx, WALL_H - 2, cz + 1.5);
+    scene.add(this.interiorLight);
   }
 
   private buildFloorMarkings(scene: THREE.Scene): void {
@@ -215,6 +263,16 @@ export class Garage {
     this.elapsed += dt;
     this.arrow.position.y = WALL_H + ROOF_RISE + 4.6 + Math.sin(this.elapsed * 3) * 0.7;
     this.arrow.rotation.y += dt * 1.5;
+
+    // 셔터 하강 애니메이션
+    if (this.shutterClosing && this.shutter) {
+      this.shutter.position.y -= dt * 5.5;
+      if (this.shutter.position.y <= 0) {
+        this.shutter.position.y = 0;
+        this.shutterClosing = false;
+        this.finishShutter();
+      }
+    }
   }
 
   /** 건물 내부 판정 */

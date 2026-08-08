@@ -90,6 +90,15 @@ export class PlayerController {
     if (this.verticalVel > 0 && corrected.y < move.y * 0.5) this.verticalVel = 0;
   }
 
+  /** 즉시 이동 (페이즈 전환 시 차고 내부 등으로) */
+  teleport(pos: THREE.Vector3, yaw: number): void {
+    this.body.setTranslation({ x: pos.x, y: pos.y, z: pos.z }, true);
+    this.body.setNextKinematicTranslation({ x: pos.x, y: pos.y, z: pos.z });
+    this.yaw = yaw;
+    this.pitch = 0;
+    this.verticalVel = 0;
+  }
+
   /** 물리 스텝 후 카메라를 눈높이에 배치 */
   syncCamera(camera: THREE.PerspectiveCamera): void {
     const pos = this.body.translation();

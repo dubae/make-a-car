@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { World, Ray, RigidBody } from '@dimforge/rapier3d-compat';
 import type { Input } from '../core/Input';
 import type { ToyPart } from '../world/ToyParts';
+import type { Assembly } from '../game/Assembly';
 
 const GRAB_DISTANCE = 5.5; // 이 거리 안의 파츠만 잡을 수 있음
 const HOLD_STIFFNESS = 14; // 잡은 물체가 목표 지점을 따라오는 속도 계수
@@ -18,6 +19,11 @@ export class Grabber {
   private held: ToyPart | null = null;
   private holdDistance = 2.5;
 
+  // Phase 2 조립 모드
+  private assembly: Assembly | null = null;
+  private partsProvider: (() => ToyPart[]) | null = null;
+  private candidate: ToyPart | null = null;
+
   constructor(
     private world: World,
     private camera: THREE.PerspectiveCamera,
@@ -33,6 +39,17 @@ export class Grabber {
     return this.hovered;
   }
 
+  /** 현재 부착 후보 (조립 모드에서 파츠를 들고 다른 파츠에 가까이 댔을 때) */
+  get attachCandidate(): ToyPart | null {
+    return this.candidate;
+  }
+
+  /** Phase 2 진입 시 조립 모드 활성화 */
+  enableAssembly(assembly: Assembly, partsProvider: () => ToyPart[]): void {
+    this.assembly = assembly;
+    this.partsProvider = partsProvider;
+  }
+
   update(dt: number, input: Input): void {
     this.updateHover();
 
@@ -40,12 +57,51 @@ export class Grabber {
     const throwPressed = input.clicked(2) || input.justPressed('KeyQ');
 
     if (this.held) {
-      if (throwPressed) this.throwHeld();
-      else if (grabPressed) this.release();
-      else this.moveHeld(dt);
+      this.updateCandidate();
+      if (throwPressed) {
+        this.clearCandidate();
+        this.throwHeld();
+      } else if (grabPressed) {
+        if (this.assembly && this.candidate) this.weldHeld();
+        else this.release();
+      } else {
+        this.moveHeld(dt);
+      }
     } else if (grabPressed && this.hovered) {
       this.grab(this.hovered);
+    } else if (
+      this.assembly &&
+      input.justPressed('KeyR') &&
+      this.hovered &&
+      this.assembly.isBonded(this.hovered)
+    ) {
+      this.assembly.detach(this.hovered);
     }
+  }
+
+  private updateCandidate(): void {
+    if (!this.assembly || !this.partsProvider || !this.held) return;
+    const next = this.assembly.findCandidate(this.held, this.partsProvider());
+    if (next === this.candidate) return;
+    if (this.candidate) this.candidate.setHighlight('none');
+    this.candidate = next;
+    if (this.candidate) this.candidate.setHighlight('target');
+  }
+
+  private clearCandidate(): void {
+    if (this.candidate) this.candidate.setHighlight('none');
+    this.candidate = null;
+  }
+
+  /** 들고 있는 파츠를 부착 후보에 용접 */
+  private weldHeld(): void {
+    const part = this.held!;
+    const target = this.candidate!;
+    this.clearCandidate();
+    this.held = null;
+    part.setHighlight('none');
+    part.body.setGravityScale(1, true);
+    this.assembly!.weld(part, target);
   }
 
   private cameraForward(): THREE.Vector3 {
@@ -110,6 +166,7 @@ export class Grabber {
   private release(): void {
     const part = this.held;
     if (!part) return;
+    this.clearCandidate();
     this.held = null;
     part.setHighlight('none');
     part.body.setGravityScale(1, true);

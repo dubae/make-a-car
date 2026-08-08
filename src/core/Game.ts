@@ -3,6 +3,8 @@ import { World } from '@dimforge/rapier3d-compat';
 import { Input } from './Input';
 import { Hud } from '../ui/Hud';
 import { PhaseManager } from '../game/PhaseManager';
+import { Assembly } from '../game/Assembly';
+import { spawnMotors } from '../world/Motor';
 import { buildToyRoom } from '../world/ToyRoomMap';
 import { spawnToyParts, ToyPart } from '../world/ToyParts';
 import { Garage } from '../world/Garage';
@@ -29,6 +31,7 @@ export class Game {
   private garage!: Garage;
   private player!: PlayerController;
   private grabber!: Grabber;
+  private assembly!: Assembly;
 
   private lastTime = 0;
 
@@ -80,7 +83,15 @@ export class Game {
         { x: -32, z: 16, radius: 3.5, count: 10 }, // 쏟아진 장난감 상자 안
       ],
     });
-    for (const p of this.parts) this.partsByCollider.set(p.colliderHandle, p);
+    this.registerParts(this.parts);
+    this.assembly = new Assembly(this.world);
+
+    // 개발/시연용 타이머 오버라이드 (예: ?p1=5&p2=30)
+    const qp = new URLSearchParams(location.search);
+    const p1 = Number(qp.get('p1'));
+    const p2 = Number(qp.get('p2'));
+    if (p1 > 0) this.phase.phase1Duration = p1;
+    if (p2 > 0) this.phase.phase2Duration = p2;
 
     // --- 플레이어 ---
     this.input = new Input(this.renderer.domElement);
@@ -91,6 +102,9 @@ export class Game {
     this.player.syncCamera(this.camera);
 
     this.wireUi();
+
+    // 개발자 콘솔/E2E 테스트용 훅
+    (window as unknown as Record<string, unknown>).__game = this;
   }
 
   private setupLights(): void {
@@ -114,42 +128,95 @@ export class Game {
     this.scene.add(fill);
   }
 
+  private registerParts(parts: ToyPart[]): void {
+    for (const p of parts) {
+      for (const h of p.colliderHandles) this.partsByCollider.set(h, p);
+    }
+  }
+
+  private removePart(p: ToyPart): void {
+    this.scene.remove(p.mesh);
+    this.world.removeRigidBody(p.body);
+    for (const h of p.colliderHandles) this.partsByCollider.delete(h);
+  }
+
   private wireUi(): void {
     this.hud.onStart = () => {
       this.hud.hideStart();
-      this.phase.start();
+      this.phase.startPhase1();
       this.input.requestLock();
+    };
+    this.hud.onAssembleStart = () => {
+      this.hud.hideInterlude();
+      this.startPhase2();
     };
     this.hud.onResume = () => this.input.requestLock();
 
     // 포인터락 해제(ESC) → 일시정지, 재획득 → 재개
     document.addEventListener('pointerlockchange', () => {
       const locked = document.pointerLockElement === this.renderer.domElement;
-      if (!locked && this.phase.state === 'playing') {
+      if (!locked && this.phase.inTimedPhase && !this.phase.paused) {
         this.phase.pause();
         this.hud.showPause(true);
-      } else if (locked && this.phase.state === 'paused') {
+      } else if (locked && this.phase.paused) {
         this.phase.resume();
         this.hud.showPause(false);
       }
     });
     // 일시정지 화면 아무 곳이나 클릭해도 재개
     document.getElementById('pause-screen')!.addEventListener('click', () => {
-      if (this.phase.state === 'paused') this.input.requestLock();
+      if (this.phase.paused) this.input.requestLock();
     });
 
-    this.phase.onEnded = () => this.endPhase1();
+    this.phase.onPhase1End = () => this.endPhase1();
+    this.phase.onPhase2End = () => this.endPhase2();
   }
 
+  /** Phase 1 종료 — 결과 요약을 보여주고 조립 시작을 기다린다 */
   private endPhase1(): void {
     this.grabber.forceRelease();
     document.exitPointerLock();
     this.hud.showPause(false);
-
     const collected = this.garage.collect(this.parts);
-    const breakdown = new Map<string, number>();
-    for (const p of collected) breakdown.set(p.name, (breakdown.get(p.name) ?? 0) + 1);
-    this.hud.showResult(collected.length, breakdown);
+    this.hud.showInterlude(collected.length, this.phase.phase2Duration);
+  }
+
+  /** Phase 2 시작 — 차고로 이동, 셔터 닫기, 밖의 파츠 제거, 모터 4개 지급 */
+  private startPhase2(): void {
+    const collected = new Set(this.garage.collect(this.parts));
+    for (const p of this.parts) {
+      if (!collected.has(p)) this.removePart(p);
+    }
+    this.parts = [...collected];
+
+    // 기본 지급 모터 4개
+    const motors = spawnMotors(this.scene, this.world, this.garage.motorSpawnPoints());
+    this.parts.push(...motors);
+    this.registerParts(motors);
+
+    this.player.teleport(this.garage.interiorSpawnPoint(), Math.PI);
+    this.garage.closeShutter();
+    this.grabber.enableAssembly(this.assembly, () => this.parts);
+
+    this.phase.startPhase2();
+    this.hud.setPhaseLabel('PHASE 2 · 자동차 조립');
+    this.hud.showGarageCounter(false);
+    this.input.requestLock();
+  }
+
+  /** Phase 2 종료 — 조립 결과 저장 + 최종 화면 */
+  private endPhase2(): void {
+    this.grabber.forceRelease();
+    document.exitPointerLock();
+    this.hud.showPause(false);
+
+    const stats = this.assembly.stats(this.parts);
+    try {
+      localStorage.setItem('makeacar.car', JSON.stringify(this.assembly.serialize(this.parts)));
+    } catch {
+      // 저장 실패해도 게임 진행에는 지장 없음
+    }
+    this.hud.showFinal(stats.partsInCar, stats.motorsUsed, stats.wheelsOnMotors);
   }
 
   start(): void {
@@ -164,7 +231,7 @@ export class Game {
     const dt = Math.min((now - this.lastTime) / 1000, 1 / 30);
     this.lastTime = now;
 
-    if (this.phase.state === 'playing') {
+    if (this.phase.running) {
       this.phase.update(dt);
 
       this.player.update(dt, this.input);
@@ -186,9 +253,14 @@ export class Game {
 
   private updateHud(): void {
     this.hud.setTimer(this.phase.remaining);
-    this.hud.setGarageCount(this.garage.collect(this.parts).length);
-    this.hud.setCrosshairTarget(this.grabber.hoveredPart !== null);
+    this.hud.setCrosshairTarget(this.grabber.hoveredPart !== null || this.grabber.attachCandidate !== null);
 
+    if (this.phase.phase === 'phase2') {
+      this.updateAssemblyHint();
+      return;
+    }
+
+    this.hud.setGarageCount(this.garage.collect(this.parts).length);
     if (this.grabber.heldPart) {
       this.hud.setHint(
         `<b>${this.grabber.heldPart.name}</b> 들고 있음 — <kbd>클릭</kbd> 놓기 · <kbd>우클릭</kbd> 던지기`,
@@ -197,6 +269,26 @@ export class Game {
       this.hud.setHint(`<kbd>클릭</kbd> 또는 <kbd>E</kbd> — <b>${this.grabber.hoveredPart.name}</b> 줍기`);
     } else {
       this.hud.setHint('재료를 주워서 <b style="color:#ffd93d">차고지 건물</b>에 모으세요!');
+    }
+  }
+
+  private updateAssemblyHint(): void {
+    const held = this.grabber.heldPart;
+    const candidate = this.grabber.attachCandidate;
+    const hovered = this.grabber.hoveredPart;
+
+    if (held && candidate) {
+      this.hud.setHint(`<kbd>클릭</kbd> — <b style="color:#6ee76e">${candidate.name}</b>에 부착!`);
+    } else if (held) {
+      this.hud.setHint(
+        `<b>${held.name}</b> 들고 있음 — 다른 파츠에 가까이 대면 부착 · <kbd>클릭</kbd> 내려놓기`,
+      );
+    } else if (hovered && this.assembly.isBonded(hovered)) {
+      this.hud.setHint(`<kbd>클릭</kbd>/<kbd>E</kbd> 들기 · <kbd>R</kbd> <b>${hovered.name}</b> 분해`);
+    } else if (hovered) {
+      this.hud.setHint(`<kbd>클릭</kbd> 또는 <kbd>E</kbd> — <b>${hovered.name}</b> 들기`);
+    } else {
+      this.hud.setHint('파츠를 붙여 차를 만드세요! <b>모터의 빨간 축</b>에 바퀴 파츠를 달아야 굴러갑니다');
     }
   }
 }

@@ -109,26 +109,49 @@ export const PART_CATALOG: ToyPartSpec[] = [
   },
 ];
 
-/** 파밍 가능한 낱개 파츠 하나 (Three 메시 + Rapier 강체) */
+/** 파츠 종류 식별 정보 — Phase 2 조립 저장/Phase 3 재구성에 사용 */
+export interface PartInfo {
+  shape: ToyShape | 'motor';
+  size: [number, number, number];
+  color: number;
+  isMotor: boolean;
+}
+
+export type HighlightMode = 'none' | 'hover' | 'held' | 'target';
+
+const HIGHLIGHT_EMISSIVE: Record<HighlightMode, number> = {
+  none: 0x000000,
+  hover: 0x554400, // 시선 대상 (노랑)
+  held: 0x114411, // 들고 있음
+  target: 0x1d7a1d, // 부착 후보 (초록)
+};
+
+/** 파밍/조립 가능한 낱개 파츠 하나 (Three 오브젝트 + Rapier 강체) */
 export class ToyPart {
   /** 들고 다닐 때 카메라와의 거리 계산에 쓰는 대략적 반지름 */
   readonly boundingRadius: number;
-  private baseEmissive = 0x000000;
+  readonly colliderHandles: number[];
+  private emissiveMats: THREE.MeshStandardMaterial[] = [];
 
   constructor(
     public readonly name: string,
-    public readonly mesh: THREE.Mesh,
+    public readonly mesh: THREE.Object3D,
     public readonly body: RigidBody,
-    public readonly colliderHandle: number,
+    colliderHandles: number | number[],
+    public readonly info: PartInfo,
   ) {
+    this.colliderHandles = Array.isArray(colliderHandles) ? colliderHandles : [colliderHandles];
     const s = new THREE.Box3().setFromObject(mesh).getSize(new THREE.Vector3());
     this.boundingRadius = Math.max(s.x, s.y, s.z) / 2;
+    mesh.traverse((o) => {
+      if (o instanceof THREE.Mesh && 'emissive' in (o.material as THREE.Material)) {
+        this.emissiveMats.push(o.material as THREE.MeshStandardMaterial);
+      }
+    });
   }
 
-  setHighlight(mode: 'none' | 'hover' | 'held'): void {
-    const mat = this.mesh.material as THREE.MeshStandardMaterial;
-    const e = mode === 'none' ? this.baseEmissive : mode === 'hover' ? 0x554400 : 0x114411;
-    mat.emissive.setHex(e);
+  setHighlight(mode: HighlightMode): void {
+    for (const m of this.emissiveMats) m.emissive.setHex(HIGHLIGHT_EMISSIVE[mode]);
   }
 
   syncMesh(): void {
@@ -253,7 +276,14 @@ export function spawnToyParts(scene: THREE.Scene, world: World, area: SpawnArea,
       body,
     );
 
-    parts.push(new ToyPart(spec.name, mesh, body, collider.handle));
+    parts.push(
+      new ToyPart(spec.name, mesh, body, collider.handle, {
+        shape: spec.shape,
+        size: spec.size,
+        color,
+        isMotor: false,
+      }),
+    );
   }
 
   return parts;
