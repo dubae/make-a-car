@@ -1,6 +1,32 @@
 import * as THREE from 'three';
-import RAPIER, { World, ImpulseJoint } from '@dimforge/rapier3d-compat';
+import RAPIER, { World, ImpulseJoint, RigidBody } from '@dimforge/rapier3d-compat';
 import type { ToyPart } from '../world/ToyParts';
+
+/** 두 강체의 현재 상대 자세를 유지하는 고정 조인트 생성 (anchor = 월드 기준 피벗) */
+export function createFixedJoint(
+  world: World,
+  b1: RigidBody,
+  b2: RigidBody,
+  anchor: THREE.Vector3,
+): ImpulseJoint {
+  const t1 = b1.translation();
+  const q1 = new THREE.Quaternion().copy(b1.rotation() as THREE.Quaternion);
+  const t2 = b2.translation();
+  const q2 = new THREE.Quaternion().copy(b2.rotation() as THREE.Quaternion);
+  const q1i = q1.clone().invert();
+  const q2i = q2.clone().invert();
+  const la1 = anchor.clone().sub(new THREE.Vector3(t1.x, t1.y, t1.z)).applyQuaternion(q1i);
+  const la2 = anchor.clone().sub(new THREE.Vector3(t2.x, t2.y, t2.z)).applyQuaternion(q2i);
+  const data = RAPIER.JointData.fixed(
+    { x: la1.x, y: la1.y, z: la1.z },
+    { x: q1i.x, y: q1i.y, z: q1i.z, w: q1i.w },
+    { x: la2.x, y: la2.y, z: la2.z },
+    { x: q2i.x, y: q2i.y, z: q2i.z, w: q2i.w },
+  );
+  const joint = world.createImpulseJoint(data, b1, b2, true);
+  joint.setContactsEnabled(false); // 결합면 접촉이 조인트와 싸우지 않게
+  return joint;
+}
 
 /** 들고 있는 파츠와 다른 파츠 표면 간격이 이 값 이하면 부착 후보 */
 const SNAP_GAP = 0.32;
@@ -123,26 +149,22 @@ export class Assembly {
     }
 
     // 현재 상대 자세를 유지하는 고정 조인트
-    const t1 = held.body.translation();
-    const q1 = new THREE.Quaternion().copy(held.body.rotation() as THREE.Quaternion);
-    const t2 = target.body.translation();
-    const q2 = new THREE.Quaternion().copy(target.body.rotation() as THREE.Quaternion);
-    const q1i = q1.clone().invert();
-    const q2i = q2.clone().invert();
-    const la1 = anchor.clone().sub(new THREE.Vector3(t1.x, t1.y, t1.z)).applyQuaternion(q1i);
-    const la2 = anchor.clone().sub(new THREE.Vector3(t2.x, t2.y, t2.z)).applyQuaternion(q2i);
-
-    const data = RAPIER.JointData.fixed(
-      { x: la1.x, y: la1.y, z: la1.z },
-      { x: q1i.x, y: q1i.y, z: q1i.z, w: q1i.w },
-      { x: la2.x, y: la2.y, z: la2.z },
-      { x: q2i.x, y: q2i.y, z: q2i.z, w: q2i.w },
-    );
-    const joint = this.world.createImpulseJoint(data, held.body, target.body, true);
+    const joint = createFixedJoint(this.world, held.body, target.body, anchor);
 
     held.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
     held.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
     this.bonds.push({ a: held, b: target, joint });
+  }
+
+  /** 특정 두 파츠 사이의 본드만 제거 (Phase 3에서 바퀴 조인트로 교체할 때) */
+  removeBondBetween(a: ToyPart, b: ToyPart): void {
+    const idx = this.bonds.findIndex(
+      (bd) => (bd.a === a && bd.b === b) || (bd.a === b && bd.b === a),
+    );
+    if (idx >= 0) {
+      this.world.removeImpulseJoint(this.bonds[idx].joint, true);
+      this.bonds.splice(idx, 1);
+    }
   }
 
   /** 파츠에 연결된 모든 본드 제거. 반환: 제거 개수 */

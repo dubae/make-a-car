@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { World, RigidBodyDesc, ColliderDesc } from '@dimforge/rapier3d-compat';
+import { World, RigidBody, RigidBodyDesc, ColliderDesc } from '@dimforge/rapier3d-compat';
 import { plastic, painted, concreteMat, wallMat, TOY_COLORS } from './materials';
 import type { ToyPart } from './ToyParts';
 
@@ -19,6 +19,8 @@ export class Garage {
   private interiorLight!: THREE.PointLight;
   private shutter: THREE.Group | null = null;
   private shutterClosing = false;
+  private shutterOpening = false;
+  private doorBody: RigidBody | null = null;
 
   constructor(
     private scene: THREE.Scene,
@@ -69,10 +71,21 @@ export class Garage {
 
   private finishShutter(): void {
     const { x: cx, z: cz } = this.center;
-    const body = this.world.createRigidBody(
+    this.doorBody = this.world.createRigidBody(
       RigidBodyDesc.fixed().setTranslation(cx, 3.2, cz - HALF_Z + 0.55),
     );
-    this.world.createCollider(ColliderDesc.cuboid(HALF_X - 1.2, 3.2, 0.15), body);
+    this.world.createCollider(ColliderDesc.cuboid(HALF_X - 1.2, 3.2, 0.15), this.doorBody);
+  }
+
+  /** 레이싱 시작 시 셔터 재개방 */
+  openShutter(): void {
+    if (!this.shutter) return;
+    if (this.doorBody) {
+      this.world.removeRigidBody(this.doorBody);
+      this.doorBody = null;
+    }
+    this.shutterClosing = false;
+    this.shutterOpening = true;
   }
 
   private wall(
@@ -264,13 +277,19 @@ export class Garage {
     this.arrow.position.y = WALL_H + ROOF_RISE + 4.6 + Math.sin(this.elapsed * 3) * 0.7;
     this.arrow.rotation.y += dt * 1.5;
 
-    // 셔터 하강 애니메이션
+    // 셔터 하강/상승 애니메이션
     if (this.shutterClosing && this.shutter) {
       this.shutter.position.y -= dt * 5.5;
       if (this.shutter.position.y <= 0) {
         this.shutter.position.y = 0;
         this.shutterClosing = false;
         this.finishShutter();
+      }
+    } else if (this.shutterOpening && this.shutter) {
+      this.shutter.position.y += dt * 5.5;
+      if (this.shutter.position.y >= 6.4) {
+        this.shutter.position.y = 6.4;
+        this.shutterOpening = false;
       }
     }
   }

@@ -148,12 +148,23 @@
         <button id="resume-btn">계속하기</button>
       </div>
 
-      <div id="result-screen" class="overlay hidden">
+      <div id="race-screen" class="overlay hidden">
         <h2>🔧 조립 완료!</h2>
-        <h1><span class="accent" id="result-count">0</span>개 파츠로 만든 자동차</h1>
+        <h1><span class="accent" id="race-parts">0</span>개 파츠 자동차</h1>
+        <div id="race-stats"></div>
+        <div class="controls">
+          <kbd>W</kbd>/<kbd>S</kbd> 가속·후진 &nbsp;·&nbsp; <kbd>A</kbd>/<kbd>D</kbd> 조향<br />
+          방을 한 바퀴 도는 <b style="color:#ffd93d">빛나는 게이트</b>를 순서대로 통과하세요!<br />
+          <kbd>Enter</kbd> 중도 포기
+        </div>
+        <button id="race-btn">🏁 레이싱 시작</button>
+      </div>
+
+      <div id="result-screen" class="overlay hidden">
+        <h2 id="result-title">🏁 완주!</h2>
+        <h1 id="result-headline"></h1>
         <div id="result-parts"></div>
-        <p style="margin-top: 18px">PHASE 3 (레이싱)는 다음 업데이트에서 만나요 🏁<br />
-          조립한 차는 저장되었습니다.</p>
+        <p id="result-note" style="margin-top: 18px"></p>
         <button id="restart-btn">다시 하기</button>
       </div>
     </div>

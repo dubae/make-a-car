@@ -4,6 +4,7 @@ import { Input } from './Input';
 import { Hud } from '../ui/Hud';
 import { PhaseManager } from '../game/PhaseManager';
 import { Assembly } from '../game/Assembly';
+import { RaceManager } from '../game/RaceManager';
 import { spawnMotors } from '../world/Motor';
 import { buildToyRoom } from '../world/ToyRoomMap';
 import { spawnToyParts, ToyPart } from '../world/ToyParts';
@@ -32,6 +33,7 @@ export class Game {
   private player!: PlayerController;
   private grabber!: Grabber;
   private assembly!: Assembly;
+  private race: RaceManager | null = null;
 
   private lastTime = 0;
 
@@ -151,6 +153,10 @@ export class Game {
       this.hud.hideInterlude();
       this.startPhase2();
     };
+    this.hud.onRaceStart = () => {
+      this.hud.hideRaceScreen();
+      this.startPhase3();
+    };
     this.hud.onResume = () => this.input.requestLock();
 
     // 포인터락 해제(ESC) → 일시정지, 재획득 → 재개
@@ -205,7 +211,7 @@ export class Game {
     this.input.requestLock();
   }
 
-  /** Phase 2 종료 — 조립 결과 저장 + 최종 화면 */
+  /** Phase 2 종료 — 조립 결과 저장 + 레이싱 안내 화면 */
   private endPhase2(): void {
     this.grabber.forceRelease();
     document.exitPointerLock();
@@ -217,7 +223,33 @@ export class Game {
     } catch {
       // 저장 실패해도 게임 진행에는 지장 없음
     }
-    this.hud.showFinal(stats.partsInCar, stats.motorsUsed, stats.wheelsOnMotors);
+    this.hud.showRaceScreen(stats.partsInCar, stats.motorsUsed, stats.wheelsOnMotors);
+  }
+
+  /** Phase 3 시작 — 차 재구성, 출발선 이동, 3인칭 레이싱 */
+  private startPhase3(): void {
+    this.garage.openShutter();
+    this.race = new RaceManager(this.scene, this.world, this.assembly, this.parts);
+    this.race.buildCar();
+    this.race.onFinish = () => this.endPhase3(true);
+
+    this.phase.startPhase3();
+    this.hud.setPhaseLabel('PHASE 3 · 레이싱');
+    this.hud.showGarageCounter(false);
+    // 3인칭 주행은 포인터락이 필요 없다 (키보드 전용)
+  }
+
+  /** Phase 3 종료 — 완주 또는 포기 */
+  private endPhase3(finished: boolean): void {
+    if (!this.race) return;
+    this.race.stop();
+    this.phase.phase = 'ended';
+    this.hud.showRaceResult(
+      finished,
+      this.race.time,
+      this.race.currentGate,
+      this.race.gates.length,
+    );
   }
 
   start(): void {
@@ -235,13 +267,18 @@ export class Game {
     if (this.phase.running) {
       this.phase.update(dt);
 
-      this.player.update(dt, this.input);
-      this.grabber.update(dt, this.input);
+      if (this.phase.phase === 'phase3' && this.race) {
+        this.race.update(dt, this.input, this.camera);
+        if (this.input.justPressed('Enter') && !this.race.finished) this.endPhase3(false);
+      } else {
+        this.player.update(dt, this.input);
+        this.grabber.update(dt, this.input);
+      }
 
       this.world.timestep = dt;
       this.world.step();
 
-      this.player.syncCamera(this.camera);
+      if (this.phase.phase !== 'phase3') this.player.syncCamera(this.camera);
       for (const p of this.parts) p.syncMesh();
       this.garage.update(dt);
 
@@ -254,6 +291,15 @@ export class Game {
 
   private updateHud(): void {
     this.hud.setTimer(this.phase.remaining);
+
+    if (this.phase.phase === 'phase3' && this.race) {
+      this.hud.setCrosshairTarget(false);
+      this.hud.setHint(
+        `게이트 <b style="color:#ffd93d">${this.race.currentGate}/${this.race.gates.length}</b> · <kbd>W</kbd>/<kbd>S</kbd> 가속 · <kbd>A</kbd>/<kbd>D</kbd> 조향 · <kbd>Enter</kbd> 포기`,
+      );
+      return;
+    }
+
     this.hud.setCrosshairTarget(this.grabber.hoveredPart !== null || this.grabber.attachCandidate !== null);
 
     if (this.phase.phase === 'phase2') {
