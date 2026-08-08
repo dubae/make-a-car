@@ -3,7 +3,7 @@ import RAPIER, { World, ImpulseJoint } from '@dimforge/rapier3d-compat';
 import type { ToyPart } from '../world/ToyParts';
 
 /** 들고 있는 파츠와 다른 파츠 표면 간격이 이 값 이하면 부착 후보 */
-const SNAP_GAP = 0.55;
+const SNAP_GAP = 0.32;
 
 export interface Bond {
   a: ToyPart;

@@ -23,6 +23,8 @@ export class Grabber {
   private assembly: Assembly | null = null;
   private partsProvider: (() => ToyPart[]) | null = null;
   private candidate: ToyPart | null = null;
+  /** 조립 모드에서 들고 있는 파츠의 목표 회전 (90° 그리드) */
+  private holdRotation: THREE.Quaternion | null = null;
 
   constructor(
     private world: World,
@@ -58,6 +60,7 @@ export class Grabber {
 
     if (this.held) {
       this.updateCandidate();
+      if (this.assembly) this.handleRotationKeys(input);
       if (throwPressed) {
         this.clearCandidate();
         this.throwHeld();
@@ -99,6 +102,7 @@ export class Grabber {
     const target = this.candidate!;
     this.clearCandidate();
     this.held = null;
+    this.holdRotation = null;
     part.setHighlight('none');
     part.body.setGravityScale(1, true);
     this.assembly!.weld(part, target);
@@ -137,6 +141,23 @@ export class Grabber {
     part.body.wakeUp();
     // 큰 파츠는 좀 더 멀리 들어서 시야를 가리지 않게
     this.holdDistance = Math.min(2.1 + part.boundingRadius, 4);
+    // 조립 모드: 잡는 순간 가장 가까운 90° 정렬로 스냅 → 반듯하게 붙이기 쉬움
+    this.holdRotation = this.assembly
+      ? snapQuaternionTo90(new THREE.Quaternion().copy(part.body.rotation() as THREE.Quaternion))
+      : null;
+  }
+
+  /** 바라보는 시점 기준 90° 회전: Z=가로 스핀, X=앞뒤로 눕히기, C=시계방향 굴리기 */
+  private handleRotationKeys(input: Input): void {
+    if (!this.holdRotation) return;
+    let camAxis: THREE.Vector3 | null = null;
+    if (input.justPressed('KeyZ')) camAxis = new THREE.Vector3(0, 1, 0);
+    else if (input.justPressed('KeyX')) camAxis = new THREE.Vector3(1, 0, 0);
+    else if (input.justPressed('KeyC')) camAxis = new THREE.Vector3(0, 0, -1);
+    if (!camAxis) return;
+    // 카메라 축을 가장 가까운 월드축으로 스냅해 예측 가능한 회전을 만든다
+    const axis = dominantAxis(camAxis.applyQuaternion(this.camera.quaternion));
+    this.holdRotation.premultiply(new THREE.Quaternion().setFromAxisAngle(axis, Math.PI / 2));
   }
 
   private moveHeld(_dt: number): void {
@@ -158,9 +179,29 @@ export class Grabber {
     if (vel.length() > HOLD_MAX_SPEED) vel.setLength(HOLD_MAX_SPEED);
     part.body.setLinvel({ x: vel.x, y: vel.y, z: vel.z }, true);
 
-    // 회전은 서서히 감쇠
-    const av = part.body.angvel();
-    part.body.setAngvel({ x: av.x * 0.9, y: av.y * 0.9, z: av.z * 0.9 }, true);
+    if (this.holdRotation) {
+      // 목표 회전(90° 그리드)을 향해 각속도를 걸어준다
+      const qCur = new THREE.Quaternion().copy(part.body.rotation() as THREE.Quaternion);
+      const qErr = this.holdRotation.clone().multiply(qCur.invert());
+      if (qErr.w < 0) {
+        qErr.set(-qErr.x, -qErr.y, -qErr.z, -qErr.w);
+      }
+      const s = Math.sqrt(Math.max(0, 1 - qErr.w * qErr.w));
+      const angle = 2 * Math.acos(Math.min(1, qErr.w));
+      if (s > 1e-4 && angle > 0.01) {
+        const speed = Math.min(angle * 9, 13);
+        part.body.setAngvel(
+          { x: (qErr.x / s) * speed, y: (qErr.y / s) * speed, z: (qErr.z / s) * speed },
+          true,
+        );
+      } else {
+        part.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+      }
+    } else {
+      // 회전은 서서히 감쇠
+      const av = part.body.angvel();
+      part.body.setAngvel({ x: av.x * 0.9, y: av.y * 0.9, z: av.z * 0.9 }, true);
+    }
   }
 
   private release(): void {
@@ -168,6 +209,7 @@ export class Grabber {
     if (!part) return;
     this.clearCandidate();
     this.held = null;
+    this.holdRotation = null;
     part.setHighlight('none');
     part.body.setGravityScale(1, true);
     // 들고 있던 관성이 너무 크지 않게 절반으로
@@ -179,6 +221,7 @@ export class Grabber {
     const part = this.held;
     if (!part) return;
     this.held = null;
+    this.holdRotation = null;
     part.setHighlight('none');
     part.body.setGravityScale(1, true);
     const dir = this.cameraForward();
@@ -192,4 +235,39 @@ export class Grabber {
   forceRelease(): void {
     this.release();
   }
+}
+
+/** 벡터를 가장 가까운 월드축(±X/±Y/±Z) 단위벡터로 스냅 */
+function dominantAxis(v: THREE.Vector3): THREE.Vector3 {
+  const ax = Math.abs(v.x);
+  const ay = Math.abs(v.y);
+  const az = Math.abs(v.z);
+  if (ax >= ay && ax >= az) return new THREE.Vector3(Math.sign(v.x) || 1, 0, 0);
+  if (ay >= az) return new THREE.Vector3(0, Math.sign(v.y) || 1, 0);
+  return new THREE.Vector3(0, 0, Math.sign(v.z) || 1);
+}
+
+/** 회전을 가장 가까운 90° 그리드 방향으로 스냅 */
+function snapQuaternionTo90(q: THREE.Quaternion): THREE.Quaternion {
+  const m = new THREE.Matrix4().makeRotationFromQuaternion(q);
+  const bx = new THREE.Vector3();
+  const by = new THREE.Vector3();
+  const bz = new THREE.Vector3();
+  m.extractBasis(bx, by, bz);
+  const sx = dominantAxis(bx);
+  let sy = dominantAxis(by);
+  if (Math.abs(sx.dot(sy)) > 0.5) {
+    // 두 축이 같은 월드축으로 스냅되면 y는 남은 축 중 원래 방향과 가장 가까운 것
+    const candidates = [
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(-1, 0, 0),
+      new THREE.Vector3(0, 1, 0),
+      new THREE.Vector3(0, -1, 0),
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(0, 0, -1),
+    ].filter((c) => Math.abs(c.dot(sx)) < 0.5);
+    sy = candidates.reduce((best, c) => (c.dot(by) > best.dot(by) ? c : best));
+  }
+  const sz = new THREE.Vector3().crossVectors(sx, sy);
+  return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(sx, sy, sz));
 }

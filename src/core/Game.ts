@@ -278,10 +278,12 @@ export class Game {
     const hovered = this.grabber.hoveredPart;
 
     if (held && candidate) {
-      this.hud.setHint(`<kbd>클릭</kbd> — <b style="color:#6ee76e">${candidate.name}</b>에 부착!`);
+      this.hud.setHint(
+        `<kbd>클릭</kbd> — <b style="color:#6ee76e">${candidate.name}</b>에 부착! · <kbd>Z</kbd>/<kbd>X</kbd>/<kbd>C</kbd> 회전`,
+      );
     } else if (held) {
       this.hud.setHint(
-        `<b>${held.name}</b> 들고 있음 — 다른 파츠에 가까이 대면 부착 · <kbd>클릭</kbd> 내려놓기`,
+        `<b>${held.name}</b> — 가까이 대면 부착 · <kbd>Z</kbd>/<kbd>X</kbd>/<kbd>C</kbd> 90° 회전 · <kbd>클릭</kbd> 내려놓기`,
       );
     } else if (hovered && this.assembly.isBonded(hovered)) {
       this.hud.setHint(`<kbd>클릭</kbd>/<kbd>E</kbd> 들기 · <kbd>R</kbd> <b>${hovered.name}</b> 분해`);
