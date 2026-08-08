@@ -1,7 +1,7 @@
 export type PhaseState = 'ready' | 'playing' | 'paused' | 'ended';
 
-/** Phase 1 파밍 제한 시간 (초) */
-export const PHASE1_DURATION = 120;
+/** Phase 1 파밍 제한 시간 (초) — 방이 커진 만큼 여유 있게 */
+export const PHASE1_DURATION = 150;
 
 /**
  * 게임 페이즈 상태 머신.

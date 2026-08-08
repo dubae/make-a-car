@@ -9,8 +9,8 @@ import {
 } from '@dimforge/rapier3d-compat';
 import type { Input } from '../core/Input';
 
-const WALK_SPEED = 5.2;
-const RUN_SPEED = 8.5;
+const WALK_SPEED = 6.5;
+const RUN_SPEED = 11;
 const JUMP_SPEED = 8;
 const GRAVITY = -22;
 const MOUSE_SENSITIVITY = 0.0021;

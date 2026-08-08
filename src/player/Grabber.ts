@@ -3,10 +3,10 @@ import { World, Ray, RigidBody } from '@dimforge/rapier3d-compat';
 import type { Input } from '../core/Input';
 import type { ToyPart } from '../world/ToyParts';
 
-const GRAB_DISTANCE = 4.6; // 이 거리 안의 파츠만 잡을 수 있음
+const GRAB_DISTANCE = 5.5; // 이 거리 안의 파츠만 잡을 수 있음
 const HOLD_STIFFNESS = 14; // 잡은 물체가 목표 지점을 따라오는 속도 계수
-const HOLD_MAX_SPEED = 22;
-const BREAK_DISTANCE = 7; // 벽에 끼는 등 너무 멀어지면 자동으로 놓침
+const HOLD_MAX_SPEED = 24;
+const BREAK_DISTANCE = 8.5; // 벽에 끼는 등 너무 멀어지면 자동으로 놓침
 const THROW_SPEED = 13;
 
 /**

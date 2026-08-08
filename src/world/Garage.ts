@@ -1,10 +1,17 @@
 import * as THREE from 'three';
+import { World, RigidBodyDesc, ColliderDesc } from '@dimforge/rapier3d-compat';
 import { toonMaterial, TOY_COLORS } from './materials';
 import type { ToyPart } from './ToyParts';
 
+const WALL_H = 9; // 벽 높이
+const HALF_X = 7.5; // 건물 절반 폭 (x)
+const HALF_Z = 6.5; // 건물 절반 깊이 (z)
+const ROOF_RISE = 4.5;
+
 /**
- * 플레이어의 차고지 — 노란 매트 영역.
- * Phase 1 종료 시 이 영역 안의 파츠만 소유하게 된다.
+ * 플레이어의 차고지 — 셔터가 반쯤 열린 진짜 차고 건물.
+ * 개구부는 -z 방향(방 중앙)을 향한다.
+ * Phase 1 종료 시 건물 내부의 파츠만 소유하게 된다.
  */
 export class Garage {
   private arrow!: THREE.Mesh;
@@ -12,103 +19,215 @@ export class Garage {
 
   constructor(
     scene: THREE.Scene,
+    private world: World,
     public readonly center: THREE.Vector3,
-    public readonly halfSize = 4,
   ) {
-    this.buildVisuals(scene);
+    this.buildBuilding(scene);
+    this.buildFloorMarkings(scene);
+    this.buildSignAndBeacon(scene);
   }
 
-  private buildVisuals(scene: THREE.Scene): void {
-    const { center, halfSize } = this;
-
-    // 매트
-    const mat = new THREE.Mesh(
-      new THREE.BoxGeometry(halfSize * 2, 0.08, halfSize * 2),
-      new THREE.MeshToonMaterial({ color: 0xffe27a, transparent: true, opacity: 0.85 }),
+  private wall(
+    scene: THREE.Scene,
+    size: [number, number, number],
+    pos: [number, number, number],
+    color: number,
+    rotZ = 0,
+  ): void {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), toonMaterial(color));
+    mesh.position.set(...pos);
+    mesh.rotation.z = rotZ;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+    const body = this.world.createRigidBody(
+      RigidBodyDesc.fixed().setTranslation(...pos).setRotation(
+        new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, rotZ)),
+      ),
     );
-    mat.position.set(center.x, 0.04, center.z);
-    mat.receiveShadow = true;
-    scene.add(mat);
+    this.world.createCollider(ColliderDesc.cuboid(size[0] / 2, size[1] / 2, size[2] / 2), body);
+  }
 
-    // 테두리 스트라이프
-    const borderMat = toonMaterial(TOY_COLORS.orange);
-    const b = halfSize;
-    const strips: [number, number, number, number][] = [
-      // [w, d, x, z]
-      [b * 2 + 0.3, 0.3, 0, -b],
-      [b * 2 + 0.3, 0.3, 0, b],
-      [0.3, b * 2 + 0.3, -b, 0],
-      [0.3, b * 2 + 0.3, b, 0],
-    ];
-    for (const [w, d, x, z] of strips) {
-      const strip = new THREE.Mesh(new THREE.BoxGeometry(w, 0.12, d), borderMat);
-      strip.position.set(center.x + x, 0.06, center.z + z);
-      scene.add(strip);
-    }
+  private buildBuilding(scene: THREE.Scene): void {
+    const { x: cx, z: cz } = this.center;
+    const wallColor = 0xece1cb;
+    const trim = 0xffffff;
 
-    // 코너 기둥
+    // 뒷벽 + 좌우 측벽
+    this.wall(scene, [HALF_X * 2, WALL_H, 0.8], [cx, WALL_H / 2, cz + HALF_Z - 0.4], wallColor);
+    this.wall(scene, [0.8, WALL_H, HALF_Z * 2], [cx - HALF_X + 0.4, WALL_H / 2, cz], wallColor);
+    this.wall(scene, [0.8, WALL_H, HALF_Z * 2], [cx + HALF_X - 0.4, WALL_H / 2, cz], wallColor);
+    // 개구부 위 헤더 보
+    this.wall(scene, [HALF_X * 2, 2.6, 0.8], [cx, WALL_H - 1.3, cz - HALF_Z + 0.4], wallColor);
+
+    // 모서리 흰 트림 기둥
     for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
-      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 1.6, 10), borderMat);
-      post.position.set(center.x + sx * b, 0.8, center.z + sz * b);
+      const post = new THREE.Mesh(new THREE.BoxGeometry(1.1, WALL_H + 0.2, 1.1), toonMaterial(trim));
+      post.position.set(cx + sx * (HALF_X - 0.55), (WALL_H + 0.2) / 2, cz + sz * (HALF_Z - 0.55));
       post.castShadow = true;
       scene.add(post);
-      const cap = new THREE.Mesh(new THREE.SphereGeometry(0.2, 12, 8), toonMaterial(TOY_COLORS.yellow));
-      cap.position.set(center.x + sx * b, 1.68, center.z + sz * b);
-      scene.add(cap);
     }
 
-    // "차고지" 간판
-    const sign = this.makeSign('🚗 차고지');
-    sign.position.set(center.x, 3.2, center.z);
-    scene.add(sign);
+    // 반쯤 말려 올라간 셔터 (개구부 안쪽 상단의 롤 + 슬랫 두 줄)
+    const rollMat = toonMaterial(0xc9c9cf);
+    const roll = new THREE.Mesh(new THREE.CylinderGeometry(1.05, 1.05, HALF_X * 2 - 2, 16), rollMat);
+    roll.rotation.z = Math.PI / 2;
+    roll.position.set(cx, WALL_H - 2.4, cz - HALF_Z + 1.4);
+    roll.castShadow = true;
+    scene.add(roll);
+    for (let i = 0; i < 2; i++) {
+      const slat = new THREE.Mesh(new THREE.BoxGeometry(HALF_X * 2 - 2.2, 0.55, 0.3), rollMat);
+      slat.position.set(cx, WALL_H - 3.6 - i * 0.62, cz - HALF_Z + 0.6);
+      scene.add(slat);
+    }
+    // 셔터 레일
+    for (const s of [-1, 1]) {
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(0.5, WALL_H - 1, 0.5), toonMaterial(0xb9b9bf));
+      rail.position.set(cx + s * (HALF_X - 1.15), (WALL_H - 1) / 2, cz - HALF_Z + 0.55);
+      scene.add(rail);
+    }
 
-    // 위에서 통통 튀는 안내 화살표
-    this.arrow = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1.1, 4), toonMaterial(TOY_COLORS.yellow));
-    this.arrow.rotation.x = Math.PI;
-    this.arrow.position.set(center.x, 5, center.z);
-    scene.add(this.arrow);
+    // 박공 지붕 (빨간 경사 슬래브 2장 + 앞뒤 삼각 게이블)
+    const slope = Math.atan2(ROOF_RISE, HALF_X);
+    const slabLen = Math.hypot(HALF_X + 0.9, ROOF_RISE + 0.55);
+    for (const s of [-1, 1]) {
+      const size: [number, number, number] = [slabLen, 0.6, HALF_Z * 2 + 2];
+      const pos: [number, number, number] = [
+        cx + (s * (HALF_X + 0.9)) / 2 - (s * 0.2),
+        WALL_H + ROOF_RISE / 2 + 0.35,
+        cz,
+      ];
+      this.wall(scene, size, pos, TOY_COLORS.red, -s * slope);
+    }
+    // 용마루
+    const ridge = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.8, HALF_Z * 2 + 2.2), toonMaterial(0xc23d3d));
+    ridge.position.set(cx, WALL_H + ROOF_RISE + 0.55, cz);
+    ridge.castShadow = true;
+    scene.add(ridge);
+
+    // 앞뒤 게이블 (삼각형)
+    const tri = new THREE.Shape();
+    tri.moveTo(-HALF_X, 0);
+    tri.lineTo(HALF_X, 0);
+    tri.lineTo(0, ROOF_RISE);
+    tri.closePath();
+    const gableGeo = new THREE.ExtrudeGeometry(tri, { depth: 0.8, bevelEnabled: false });
+    for (const s of [-1, 1]) {
+      const gable = new THREE.Mesh(gableGeo, toonMaterial(0xe3d5ba));
+      gable.position.set(cx, WALL_H, cz + s * (HALF_Z - 0.4) - 0.4);
+      gable.castShadow = true;
+      scene.add(gable);
+    }
+
+    // 측벽의 작은 창
+    const win = new THREE.Mesh(new THREE.PlaneGeometry(3.2, 2.4), new THREE.MeshBasicMaterial({ color: 0xfff3cf }));
+    win.position.set(cx + HALF_X - 0.85, 5.2, cz + 1);
+    win.rotation.y = Math.PI / 2;
+    scene.add(win);
+    const winFrame = new THREE.Mesh(new THREE.BoxGeometry(0.3, 3, 3.8), toonMaterial(0xffffff));
+    winFrame.position.set(cx + HALF_X - 0.95, 5.2, cz + 1);
+    scene.add(winFrame);
+    const winGlass = win.clone();
+    winGlass.position.x = cx + HALF_X - 0.75;
+    scene.add(winGlass);
+
+    // 내부 조명
+    const light = new THREE.PointLight(0xffe2ae, 180, 0, 1.8);
+    light.position.set(cx, WALL_H - 2, cz + 1.5);
+    scene.add(light);
   }
 
-  private makeSign(text: string): THREE.Object3D {
+  private buildFloorMarkings(scene: THREE.Scene): void {
+    const { x: cx, z: cz } = this.center;
+
+    // 콘크리트 바닥 슬래브 (얇은 장식)
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(HALF_X * 2 - 1, 0.1, HALF_Z * 2 - 1), toonMaterial(0x9d9da4));
+    slab.position.set(cx, 0.05, cz);
+    slab.receiveShadow = true;
+    scene.add(slab);
+
+    // 주차 라인 (노란 ㄷ자)
+    const lineMat = toonMaterial(TOY_COLORS.yellow);
+    const lines: [number, number, number, number][] = [
+      // [w, d, dx, dz]
+      [0.5, 9, -4.5, 0.5],
+      [0.5, 9, 4.5, 0.5],
+      [9.5, 0.5, 0, 4.75],
+    ];
+    for (const [w, d, dx, dz] of lines) {
+      const line = new THREE.Mesh(new THREE.BoxGeometry(w, 0.06, d), lineMat);
+      line.position.set(cx + dx, 0.13, cz + dz);
+      scene.add(line);
+    }
+    // 기름 얼룩
+    const stain = new THREE.Mesh(new THREE.CircleGeometry(1.8, 20), new THREE.MeshBasicMaterial({ color: 0x5a5a60, transparent: true, opacity: 0.5 }));
+    stain.rotation.x = -Math.PI / 2;
+    stain.position.set(cx - 2, 0.14, cz + 1.5);
+    scene.add(stain);
+
+    // 입구 위험 스트라이프 (노랑/검정)
+    for (let i = 0; i < 8; i++) {
+      const stripe = new THREE.Mesh(
+        new THREE.BoxGeometry(1.62, 0.08, 1.4),
+        toonMaterial(i % 2 === 0 ? TOY_COLORS.yellow : 0x3c3c42),
+      );
+      stripe.position.set(cx - HALF_X + 1.3 + i * 1.66, 0.04, cz - HALF_Z - 0.9);
+      stripe.receiveShadow = true;
+      scene.add(stripe);
+    }
+  }
+
+  private buildSignAndBeacon(scene: THREE.Scene): void {
+    const { x: cx, z: cz } = this.center;
+
+    // 앞 게이블의 간판
     const canvas = document.createElement('canvas');
     canvas.width = 512;
-    canvas.height = 160;
+    canvas.height = 144;
     const ctx = canvas.getContext('2d')!;
     ctx.fillStyle = '#ffffff';
     ctx.beginPath();
-    ctx.roundRect(6, 6, 500, 148, 28);
+    ctx.roundRect(4, 4, 504, 136, 22);
     ctx.fill();
-    ctx.strokeStyle = '#f29b3a';
+    ctx.strokeStyle = '#e94f4f';
     ctx.lineWidth = 10;
     ctx.stroke();
     ctx.fillStyle = '#222222';
-    ctx.font = 'bold 76px "Apple SD Gothic Neo", "Malgun Gothic", sans-serif';
+    ctx.font = 'bold 72px "Apple SD Gothic Neo", "Malgun Gothic", sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(text, 256, 86);
-
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.colorSpace = THREE.SRGBColorSpace;
-    const plane = new THREE.Mesh(
-      new THREE.PlaneGeometry(3.6, 1.1),
-      new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide }),
+    ctx.fillText('🚗 내 차고지', 256, 78);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const sign = new THREE.Mesh(
+      new THREE.PlaneGeometry(9, 2.6),
+      new THREE.MeshBasicMaterial({ map: tex, transparent: true }),
     );
-    return plane;
+    sign.position.set(cx, WALL_H + 1.7, cz - HALF_Z - 0.65);
+    sign.rotation.y = Math.PI; // 개구부(-z, 방 중앙) 쪽을 향하도록
+    scene.add(sign);
+
+    // 지붕 위 회전 화살표 비콘 (멀리서도 차고지가 보이게)
+    this.arrow = new THREE.Mesh(new THREE.ConeGeometry(1.3, 2.6, 4), toonMaterial(TOY_COLORS.yellow));
+    this.arrow.rotation.x = Math.PI;
+    this.arrow.position.set(cx, WALL_H + ROOF_RISE + 5, cz);
+    scene.add(this.arrow);
   }
 
-  /** 화살표 애니메이션 */
   update(dt: number): void {
     this.elapsed += dt;
-    this.arrow.position.y = 4.6 + Math.sin(this.elapsed * 3) * 0.35;
+    this.arrow.position.y = WALL_H + ROOF_RISE + 4.6 + Math.sin(this.elapsed * 3) * 0.7;
     this.arrow.rotation.y += dt * 1.5;
   }
 
+  /** 건물 내부 판정 */
   contains(pos: { x: number; y: number; z: number }): boolean {
     return (
-      Math.abs(pos.x - this.center.x) <= this.halfSize &&
-      Math.abs(pos.z - this.center.z) <= this.halfSize &&
+      Math.abs(pos.x - this.center.x) <= HALF_X - 0.8 &&
+      pos.z >= this.center.z - HALF_Z &&
+      pos.z <= this.center.z + HALF_Z - 0.8 &&
       pos.y >= -1 &&
-      pos.y <= 4
+      pos.y <= WALL_H
     );
   }
 

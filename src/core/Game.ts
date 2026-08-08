@@ -9,8 +9,8 @@ import { Garage } from '../world/Garage';
 import { PlayerController } from '../player/PlayerController';
 import { Grabber } from '../player/Grabber';
 
-const GARAGE_POS = new THREE.Vector3(0, 0, 19);
-const SPAWN_POS = new THREE.Vector3(0, 1.6, 14);
+const GARAGE_POS = new THREE.Vector3(24, 0, 24);
+const SPAWN_POS = new THREE.Vector3(8, 1.6, 16);
 
 /** 렌더링 + 물리 + 게임 로직을 묶는 메인 클래스 */
 export class Game {
@@ -38,9 +38,11 @@ export class Game {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 0.85;
     document.body.appendChild(this.renderer.domElement);
 
-    this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 200);
+    this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 300);
     this.scene.background = new THREE.Color(0xbfe3f2);
 
     window.addEventListener('resize', () => {
@@ -56,12 +58,17 @@ export class Game {
     this.world = new World({ x: 0, y: -9.81, z: 0 });
     buildToyRoom(this.scene, this.world);
 
-    this.garage = new Garage(this.scene, GARAGE_POS);
+    this.garage = new Garage(this.scene, this.world, GARAGE_POS);
     this.parts = spawnToyParts(this.scene, this.world, {
-      radius: 21,
+      bounds: { minX: -41, maxX: 41, minZ: -31, maxZ: 31 },
       exclude: [
-        { x: GARAGE_POS.x, z: GARAGE_POS.z, radius: 6.5 },
-        { x: SPAWN_POS.x, z: SPAWN_POS.z, radius: 3 },
+        { x: GARAGE_POS.x, z: GARAGE_POS.z, radius: 13.5 }, // 차고지 건물
+        { x: SPAWN_POS.x, z: SPAWN_POS.z, radius: 4 }, // 플레이어 스폰
+        { x: 2, z: 32, radius: 13 }, // 책장
+        { x: 40, z: 16, radius: 12 }, // 옷장
+      ],
+      clusters: [
+        { x: -32, z: 16, radius: 3.5, count: 10 }, // 쏟아진 장난감 상자 안
       ],
     });
     for (const p of this.parts) this.partsByCollider.set(p.colliderHandle, p);
@@ -78,22 +85,23 @@ export class Game {
   }
 
   private setupLights(): void {
-    const hemi = new THREE.HemisphereLight(0xcfe8ff, 0xffe0b8, 0.9);
+    const hemi = new THREE.HemisphereLight(0xcfe8ff, 0xffe0b8, 0.4);
     this.scene.add(hemi);
 
-    const sun = new THREE.DirectionalLight(0xfff2dd, 2.2);
-    sun.position.set(18, 30, 12);
+    // 창문(뒷벽) 쪽에서 들어오는 오후 햇살
+    const sun = new THREE.DirectionalLight(0xfff2dd, 1.7);
+    sun.position.set(-25, 65, -50);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
-    sun.shadow.camera.left = -30;
-    sun.shadow.camera.right = 30;
-    sun.shadow.camera.top = 30;
-    sun.shadow.camera.bottom = -30;
-    sun.shadow.camera.far = 80;
-    sun.shadow.bias = -0.0005;
+    sun.shadow.mapSize.set(4096, 4096);
+    sun.shadow.camera.left = -60;
+    sun.shadow.camera.right = 60;
+    sun.shadow.camera.top = 60;
+    sun.shadow.camera.bottom = -60;
+    sun.shadow.camera.far = 200;
+    sun.shadow.bias = -0.0004;
     this.scene.add(sun);
 
-    const fill = new THREE.AmbientLight(0xffffff, 0.25);
+    const fill = new THREE.AmbientLight(0xffffff, 0.15);
     this.scene.add(fill);
   }
 
@@ -179,7 +187,7 @@ export class Game {
     } else if (this.grabber.hoveredPart) {
       this.hud.setHint(`<kbd>클릭</kbd> 또는 <kbd>E</kbd> — <b>${this.grabber.hoveredPart.name}</b> 줍기`);
     } else {
-      this.hud.setHint('재료를 주워서 <b style="color:#ffd93d">노란 차고지</b>에 모으세요!');
+      this.hud.setHint('재료를 주워서 <b style="color:#ffd93d">차고지 건물</b>에 모으세요!');
     }
   }
 }
