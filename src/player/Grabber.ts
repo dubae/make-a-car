@@ -182,7 +182,7 @@ export class Grabber {
 
   /** 바라보는 시점 기준 90° 회전: Z=가로 스핀, X=앞뒤로 눕히기, C=시계방향 굴리기 */
   private handleRotationKeys(input: Input): void {
-    if (!this.holdRotation) return;
+    if (!this.held) return;
     let camAxis: THREE.Vector3 | null = null;
     if (input.justPressed('KeyZ')) camAxis = new THREE.Vector3(0, 1, 0);
     else if (input.justPressed('KeyX')) camAxis = new THREE.Vector3(1, 0, 0);
@@ -190,7 +190,28 @@ export class Grabber {
     if (!camAxis) return;
     // 카메라 축을 가장 가까운 월드축으로 스냅해 예측 가능한 회전을 만든다
     const axis = dominantAxis(camAxis.applyQuaternion(this.camera.quaternion));
-    this.holdRotation.premultiply(new THREE.Quaternion().setFromAxisAngle(axis, Math.PI / 2));
+    if (this.holdRotation) {
+      this.holdRotation.premultiply(new THREE.Quaternion().setFromAxisAngle(axis, Math.PI / 2));
+    } else if (this.assembly && this.assembly.isBonded(this.held)) {
+      // 결합체는 든 파츠를 피벗으로 통째로 90° 회전 (고스트 상태라 안전)
+      this.rotateClusterAround(this.held, axis);
+    }
+  }
+
+  /** 결합체 전체를 pivotPart 위치 기준으로 90° 회전 — 상대 자세가 유지되어 조인트도 그대로 */
+  private rotateClusterAround(pivotPart: ToyPart, axis: THREE.Vector3): void {
+    const q = new THREE.Quaternion().setFromAxisAngle(axis, Math.PI / 2);
+    const pv = pivotPart.body.translation();
+    const pivot = new THREE.Vector3(pv.x, pv.y, pv.z);
+    for (const p of this.assembly!.clusterOf(pivotPart)) {
+      const t = p.body.translation();
+      const pos = new THREE.Vector3(t.x, t.y, t.z).sub(pivot).applyQuaternion(q).add(pivot);
+      const rot = new THREE.Quaternion().copy(p.body.rotation() as THREE.Quaternion).premultiply(q);
+      p.body.setTranslation({ x: pos.x, y: pos.y, z: pos.z }, true);
+      p.body.setRotation({ x: rot.x, y: rot.y, z: rot.z, w: rot.w }, true);
+      p.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      p.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    }
   }
 
   private moveHeld(_dt: number): void {

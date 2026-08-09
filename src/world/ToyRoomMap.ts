@@ -18,7 +18,7 @@ export function buildToyRoom(scene: THREE.Scene, world: World): void {
   buildWallsAndCeiling(scene, world);
   buildWindowsAndCurtains(scene);
   buildDoor(scene);
-  buildRug(scene);
+  buildRug(scene, world);
   buildBed(scene, world);
   buildDeskAndChair(scene, world);
   buildBookshelf(scene, world);
@@ -240,7 +240,7 @@ function buildDoor(scene: THREE.Scene): void {
   scene.add(g);
 }
 
-function buildRug(scene: THREE.Scene): void {
+function buildRug(scene: THREE.Scene, world: World): void {
   // 링 무늬와 보풀 스펙클을 캔버스에 굽고, 카펫 텍스처의 파일(pile) 요철을 입힌 원형 카펫.
   // 단일 메시라 링끼리 겹치며 생기던 z-fighting도 사라진다.
   const size = 1024;
@@ -278,6 +278,10 @@ function buildRug(scene: THREE.Scene): void {
   rug.position.set(2, 0.08, 8);
   rug.receiveShadow = true;
   scene.add(rug);
+
+  // 물리 표면 — 콜라이더가 없으면 물체가 카펫 두께만큼 파묻혀 보인다
+  const body = world.createRigidBody(RigidBodyDesc.fixed().setTranslation(2, 0.075, 8));
+  world.createCollider(ColliderDesc.cylinder(0.075, 17).setFriction(0.9), body);
 }
 
 // ---------------------------------------------------------------- 가구

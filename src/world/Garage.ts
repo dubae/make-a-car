@@ -198,11 +198,17 @@ export class Garage {
   private buildFloorMarkings(scene: THREE.Scene): void {
     const { x: cx, z: cz } = this.center;
 
-    // 콘크리트 바닥 슬래브 (얇은 장식)
+    // 콘크리트 바닥 슬래브
     const slab = new THREE.Mesh(new THREE.BoxGeometry(HALF_X * 2 - 1, 0.1, HALF_Z * 2 - 1), concreteMat(2, 1.8));
     slab.position.set(cx, 0.07, cz);
     slab.receiveShadow = true;
     scene.add(slab);
+    // 물리 표면 — 물체가 슬래브 두께만큼 파묻히지 않게
+    const slabBody = this.world.createRigidBody(RigidBodyDesc.fixed().setTranslation(cx, 0.06, cz));
+    this.world.createCollider(
+      ColliderDesc.cuboid(HALF_X - 0.5, 0.06, HALF_Z - 0.5).setFriction(0.9),
+      slabBody,
+    );
 
     // 주차 라인 (노란 ㄷ자)
     const lineMat = painted(TOY_COLORS.yellow, 0.55);

@@ -51,8 +51,11 @@ export class RaceManager {
   private wheels: WheelDrive[] = [];
   private wheelParts = new Set<ToyPart>();
   private motorSpeed = 0;
-  private q0 = new THREE.Quaternion();
-  private lastForward = new THREE.Vector3(0, 0, -1);
+  /** 출발 전 안정화 시간 — 차가 자리잡기 전 조작으로 뒤집히는 것 방지 */
+  private startDelay = 1.2;
+  // 마우스 궤도 카메라 (차 회전과 독립)
+  private camYaw = 0;
+  private camPitch = 0.36;
   private camPos = new THREE.Vector3();
   private totalMass = 1;
   private elapsed = 0;
@@ -99,18 +102,15 @@ export class RaceManager {
       return p.body.mass() > r.body.mass() ? p : r;
     });
 
-    // 3) 출발선으로 평행이동 (클러스터 바닥이 살짝 뜨게)
-    const min = new THREE.Vector3(Infinity, Infinity, Infinity);
-    const max = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
-    for (const p of this.carParts) {
-      const t = p.body.translation();
-      min.min(new THREE.Vector3(t.x - p.boundingRadius, t.y - p.boundingRadius, t.z - p.boundingRadius));
-      max.max(new THREE.Vector3(t.x + p.boundingRadius, t.y + p.boundingRadius, t.z + p.boundingRadius));
-    }
+    // 3) 출발선으로 평행이동 — 메시 AABB로 정확한 바닥 높이를 재서
+    //    낙하 없이 바퀴가 바로 지면(러그 카펫 위 0.15)에 닿게 놓는다
+    for (const p of this.carParts) p.syncMesh();
+    const bbox = new THREE.Box3();
+    for (const p of this.carParts) bbox.union(new THREE.Box3().setFromObject(p.mesh));
     const offset = new THREE.Vector3(
-      RACE_START.x - (min.x + max.x) / 2,
-      RACE_START.y - min.y + 0.2,
-      RACE_START.z - (min.z + max.z) / 2,
+      RACE_START.x - (bbox.min.x + bbox.max.x) / 2,
+      0.22 - bbox.min.y,
+      RACE_START.z - (bbox.min.z + bbox.max.z) / 2,
     );
     for (const p of this.carParts) {
       const t = p.body.translation();
@@ -140,7 +140,6 @@ export class RaceManager {
       }
     }
 
-    this.q0.copy(this.root.body.rotation() as THREE.Quaternion);
     const t = this.root.body.translation();
     this.camPos.set(t.x, t.y + 6, t.z + 14);
     this.totalMass = this.carParts.reduce((s, p) => s + p.body.mass(), 0);
@@ -174,20 +173,38 @@ export class RaceManager {
     const mt = motor.body.translation();
     const axisWorld = new THREE.Vector3(1, 0, 0).applyQuaternion(mq);
 
-    // 바퀴 트리를 축 방향으로 살짝 밀어 회전 시 접촉 마찰이 없게 틈을 만든다
+    // 허브 위치 = 바퀴에서 가장 가까운 축 부착 스피어 (차축 모터는 양 끝에 있다)
+    const wt = wheelRoot.body.translation();
+    const wheelPos = new THREE.Vector3(wt.x, wt.y, wt.z);
+    let hubLocal = new THREE.Vector3(1.28, 0, 0);
+    let bestD = Infinity;
+    for (const sphere of motor.attachSpheres) {
+      if (sphere.offset.lengthSq() < 0.01) continue; // 중앙(마운트) 스피어 제외
+      const world = sphere.offset.clone().applyQuaternion(mq).add(new THREE.Vector3(mt.x, mt.y, mt.z));
+      const d = world.distanceTo(wheelPos);
+      if (d < bestD) {
+        bestD = d;
+        hubLocal = sphere.offset.clone();
+      }
+    }
+
+    // 바퀴 트리를 축 바깥 방향으로 살짝 밀어 회전 시 접촉 마찰이 없게 틈을 만든다
+    const pushSign = Math.sign(hubLocal.x) || 1;
     for (const p of subtree) {
       const t = p.body.translation();
       p.body.setTranslation(
-        { x: t.x + axisWorld.x * 0.08, y: t.y + axisWorld.y * 0.08, z: t.z + axisWorld.z * 0.08 },
+        {
+          x: t.x + axisWorld.x * 0.08 * pushSign,
+          y: t.y + axisWorld.y * 0.08 * pushSign,
+          z: t.z + axisWorld.z * 0.08 * pushSign,
+        },
         true,
       );
     }
 
     // 허브: 축 지점에 모터와 같은 회전으로 생성 → 두 로컬 프레임이 일치하므로
     // 회전 조인트 축 (1,0,0)을 양쪽에서 그대로 공유할 수 있다
-    const hubWorld = new THREE.Vector3(1.28, 0, 0)
-      .applyQuaternion(mq)
-      .add(new THREE.Vector3(mt.x, mt.y, mt.z));
+    const hubWorld = hubLocal.clone().applyQuaternion(mq).add(new THREE.Vector3(mt.x, mt.y, mt.z));
     const hub = this.world.createRigidBody(
       RigidBodyDesc.dynamic()
         .setTranslation(hubWorld.x, hubWorld.y, hubWorld.z)
@@ -197,7 +214,7 @@ export class RaceManager {
     );
 
     const revData = RAPIER.JointData.revolute(
-      { x: 1.28, y: 0, z: 0 },
+      { x: hubLocal.x, y: hubLocal.y, z: hubLocal.z },
       { x: 0, y: 0, z: 0 },
       { x: 1, y: 0, z: 0 },
     );
@@ -264,12 +281,15 @@ export class RaceManager {
 
   update(dt: number, input: Input, camera: THREE.PerspectiveCamera): void {
     if (!this.root) return;
-    this.time += dt;
     this.elapsed += dt;
+    if (this.startDelay > 0) this.startDelay -= dt;
+    else this.time += dt;
 
-    // --- 주행 입력 ---
-    const throttle =
-      input.isDown('KeyW') || input.isDown('ArrowUp')
+    // --- 주행 입력 (출발 딜레이 동안은 무시) ---
+    const ready = this.startDelay <= 0;
+    const throttle = !ready
+      ? 0
+      : input.isDown('KeyW') || input.isDown('ArrowUp')
         ? 1
         : input.isDown('KeyS') || input.isDown('ArrowDown')
           ? -1
@@ -335,21 +355,18 @@ export class RaceManager {
       }
     }
 
-    // --- 3인칭 추적 카메라 ---
-    const qNow = new THREE.Quaternion().copy(this.root.body.rotation() as THREE.Quaternion);
-    const delta = qNow.clone().multiply(this.q0.clone().invert());
-    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(delta);
-    fwd.y = 0;
-    if (fwd.lengthSq() > 0.01) {
-      fwd.normalize();
-      this.lastForward.copy(fwd);
-    }
+    // --- 3인칭 궤도 카메라 — 차 회전과 독립, 마우스로 시야각 조절 ---
+    const { dx, dy } = input.mouseDelta;
+    this.camYaw -= dx * 0.0022;
+    this.camPitch = THREE.MathUtils.clamp(this.camPitch + dy * 0.0022, 0.08, 1.25);
     const carPos = new THREE.Vector3(t.x, t.y, t.z);
-    const desired = carPos
-      .clone()
-      .addScaledVector(this.lastForward, -13)
-      .add(new THREE.Vector3(0, 6, 0));
-    this.camPos.lerp(desired, 1 - Math.exp(-5 * dt));
+    const cosP = Math.cos(this.camPitch);
+    const orbit = new THREE.Vector3(
+      Math.sin(this.camYaw) * cosP,
+      Math.sin(this.camPitch),
+      Math.cos(this.camYaw) * cosP,
+    ).multiplyScalar(14);
+    this.camPos.lerp(carPos.clone().add(orbit), 1 - Math.exp(-8 * dt));
     camera.position.copy(this.camPos);
     camera.lookAt(carPos.x, carPos.y + 1.5, carPos.z);
   }

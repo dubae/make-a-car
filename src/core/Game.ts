@@ -5,7 +5,7 @@ import { Hud } from '../ui/Hud';
 import { PhaseManager } from '../game/PhaseManager';
 import { Assembly } from '../game/Assembly';
 import { RaceManager } from '../game/RaceManager';
-import { spawnMotors } from '../world/Motor';
+import { spawnMotors, spawnAxleMotors } from '../world/Motor';
 import { buildToyRoom } from '../world/ToyRoomMap';
 import { spawnToyParts, ToyPart } from '../world/ToyParts';
 import { Garage } from '../world/Garage';
@@ -188,6 +188,10 @@ export class Game {
     document.getElementById('pause-screen')!.addEventListener('click', () => {
       if (this.phase.paused) this.input.requestLock();
     });
+    // 레이싱 중 화면 클릭 → 마우스 시점 조절 활성화 (포인터락)
+    this.renderer.domElement.addEventListener('click', () => {
+      if (this.phase.phase === 'phase3') this.input.requestLock();
+    });
 
     this.phase.onPhase1End = () => this.endPhase1();
     this.phase.onPhase2End = () => this.endPhase2();
@@ -227,10 +231,10 @@ export class Game {
     }
   }
 
-  /** (?phase=3) 표준 4륜차를 자동 조립 — 차체 블록 + 모터 4 + 바퀴 4 */
+  /** (?phase=3) 표준 4륜차를 자동 조립 — 차체 블록 + 개별 모터 4 + 바퀴 4 */
   private buildDebugCar(): void {
     const block = this.parts.find((p) => p.name === '대형 차체 블록');
-    const motors = this.parts.filter((p) => p.info.isMotor);
+    const motors = this.parts.filter((p) => p.name === '모터').slice(0, 4);
     const wheels = this.parts.filter((p) => p.name === '장난감 바퀴').slice(0, 4);
     if (!block || motors.length < 4 || wheels.length < 4) return;
 
@@ -264,8 +268,15 @@ export class Game {
     }
     this.parts = [...collected];
 
-    // 기본 지급 모터 4개
-    const motors = spawnMotors(this.scene, this.world, this.garage.motorSpawnPoints());
+    // 기본 지급: 개별 모터 4개 + 차축 모터 2개 (앞/뒤 차축용 — 원하는 쪽을 쓰면 된다)
+    const { x: gx, z: gz } = this.garage.center;
+    const motors = [
+      ...spawnMotors(this.scene, this.world, this.garage.motorSpawnPoints()),
+      ...spawnAxleMotors(this.scene, this.world, [
+        new THREE.Vector3(gx, 1.0, gz + 2.4),
+        new THREE.Vector3(gx, 1.0, gz + 5.0),
+      ]),
+    ];
     this.parts.push(...motors);
     this.registerParts(motors);
 
@@ -369,7 +380,7 @@ export class Game {
     if (this.phase.phase === 'phase3' && this.race) {
       this.hud.setCrosshairTarget(false);
       this.hud.setHint(
-        `게이트 <b style="color:#ffd93d">${this.race.currentGate}/${this.race.gates.length}</b> · <kbd>W</kbd>/<kbd>S</kbd> 가속 · <kbd>A</kbd>/<kbd>D</kbd> 조향 · <kbd>Enter</kbd> 포기`,
+        `게이트 <b style="color:#ffd93d">${this.race.currentGate}/${this.race.gates.length}</b> · <kbd>W</kbd>/<kbd>S</kbd> 가속 · <kbd>A</kbd>/<kbd>D</kbd> 조향 · <kbd>클릭</kbd> 마우스 시점 · <kbd>Enter</kbd> 포기`,
       );
       return;
     }
