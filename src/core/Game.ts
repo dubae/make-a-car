@@ -231,33 +231,43 @@ export class Game {
     }
   }
 
-  /** (?phase=3) 표준 4륜차를 자동 조립 — 차체 블록 + 개별 모터 4 + 바퀴 4 */
+  /** (?phase=3) 표준 4륜차를 자동 조립 — 차체 블록 + 차축 모터 2개(앞/뒤 축) + 바퀴 4 */
   private buildDebugCar(): void {
     const block = this.parts.find((p) => p.name === '대형 차체 블록');
-    const motors = this.parts.filter((p) => p.name === '모터').slice(0, 4);
+    const axles = this.parts.filter((p) => p.name === '차축 모터').slice(0, 2);
     const wheels = this.parts.filter((p) => p.name === '장난감 바퀴').slice(0, 4);
-    if (!block || motors.length < 4 || wheels.length < 4) return;
+    if (!block || axles.length < 2 || wheels.length < 4) return;
 
     const { x: cx, z: cz } = this.garage.center;
     const identity = { x: 0, y: 0, z: 0, w: 1 };
-    const yawPi = { x: 0, y: 1, z: 0, w: 0 };
     const zRot90 = { x: 0, y: 0, z: Math.SQRT1_2, w: Math.SQRT1_2 };
 
-    const place = (p: ToyPart, x: number, z: number, rot: { x: number; y: number; z: number; w: number }) => {
+    const place = (
+      p: ToyPart,
+      x: number,
+      y: number,
+      z: number,
+      rot: { x: number; y: number; z: number; w: number },
+    ) => {
       p.body.setRotation(rot, true);
-      p.body.setTranslation({ x, y: 3, z }, true);
+      p.body.setTranslation({ x, y, z }, true);
       p.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
       p.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
     };
-    place(block, cx, cz, identity);
-    const mx = [cx + 1.8, cx + 1.8, cx - 1.8, cx - 1.8];
-    const mz = [cz - 1, cz + 1, cz - 1, cz + 1];
-    motors.forEach((m, i) => place(m, mx[i], mz[i], i < 2 ? identity : yawPi));
-    const wx = [cx + 3.75, cx + 3.75, cx - 3.75, cx - 3.75];
-    wheels.forEach((w, i) => place(w, wx[i], mz[i], zRot90));
+    place(block, cx, 3, cz, identity);
+    // 앞/뒤 차축 (블록 아래) — 축 방향은 로컬 +X
+    place(axles[0], cx, 2.4, cz - 1.2, identity);
+    place(axles[1], cx, 2.4, cz + 1.2, identity);
+    // 바퀴 4개 — 각 차축 양 끝
+    const wz = [cz - 1.2, cz - 1.2, cz + 1.2, cz + 1.2];
+    const wx = [cx + 3.1, cx - 3.1, cx + 3.1, cx - 3.1];
+    wheels.forEach((w, i) => place(w, wx[i], 2.4, wz[i], zRot90));
 
-    for (const m of motors) this.assembly.weld(m, block);
-    wheels.forEach((w, i) => this.assembly.weld(w, motors[i]));
+    for (const a of axles) this.assembly.weld(a, block);
+    this.assembly.weld(wheels[0], axles[0]);
+    this.assembly.weld(wheels[1], axles[0]);
+    this.assembly.weld(wheels[2], axles[1]);
+    this.assembly.weld(wheels[3], axles[1]);
   }
 
   /** Phase 2 시작 — 차고로 이동, 셔터 닫기, 밖의 파츠 제거, 모터 4개 지급 */
@@ -346,10 +356,8 @@ export class Game {
     if (this.phase.running) {
       this.phase.update(dt);
 
-      if (this.phase.phase === 'phase3' && this.race) {
-        this.race.update(dt, this.input, this.camera);
-        if (this.input.justPressed('Enter') && !this.race.finished) this.endPhase3(false);
-      } else {
+      const racing = this.phase.phase === 'phase3' && this.race;
+      if (!racing) {
         this.player.update(dt, this.input);
         this.grabber.update(dt, this.input);
       }
@@ -359,11 +367,19 @@ export class Game {
       this.world.timestep = FIXED;
       this.accumulator = Math.min(this.accumulator + dt, FIXED * 3);
       while (this.accumulator >= FIXED) {
+        // 차량 컨트롤러(서스펜션/엔진)는 물리 스텝과 반드시 동기
+        if (racing) this.race!.physicsStep(FIXED);
         this.world.step();
         this.accumulator -= FIXED;
       }
 
-      if (this.phase.phase !== 'phase3') this.player.syncCamera(this.camera);
+      if (racing) {
+        // 물리 스텝 뒤에 갱신해야 메시/카메라가 최신 섀시 자세를 따른다
+        this.race!.update(dt, this.input, this.camera);
+        if (this.input.justPressed('Enter') && !this.race!.finished) this.endPhase3(false);
+      } else {
+        this.player.syncCamera(this.camera);
+      }
       for (const p of this.parts) p.syncMesh();
       this.garage.update(dt);
 

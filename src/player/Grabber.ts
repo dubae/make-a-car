@@ -9,6 +9,8 @@ const HOLD_STIFFNESS = 14; // 잡은 물체가 목표 지점을 따라오는 속
 const HOLD_MAX_SPEED = 24;
 const BREAK_DISTANCE = 8.5; // 벽에 끼는 등 너무 멀어지면 자동으로 놓침
 const THROW_SPEED = 13;
+/** 결합체 90° 회전 애니메이션 각속도 (90°를 약 0.18초에) */
+const CLUSTER_ROT_SPEED = Math.PI / 2 / 0.18;
 
 /**
  * 시선 끝의 파츠를 잡아서 들고 다니는 시스템 (하프라이프 그래비티건 방식).
@@ -25,6 +27,8 @@ export class Grabber {
   private candidate: ToyPart | null = null;
   /** 조립 모드에서 들고 있는 파츠의 목표 회전 (90° 그리드) */
   private holdRotation: THREE.Quaternion | null = null;
+  /** 결합체 90° 회전 진행 상태 — 즉시 스냅 대신 부드럽게 보간한다 */
+  private clusterRotation: { axis: THREE.Vector3; remaining: number } | null = null;
 
   constructor(
     private world: World,
@@ -74,9 +78,10 @@ export class Grabber {
       } else {
         // 들고 있는 파츠도 R로 분해 (클러스터에서 떼어내 단독으로 든다)
         if (this.assembly && input.justPressed('KeyR') && this.assembly.isBonded(this.held)) {
-          this.setClusterGhost(this.held, false); // 떨어져 나갈 결합체의 고스트 상태 복원
+          this.finishClusterRotation();
+          this.setClusterCarried(this.held, false); // 떨어져 나갈 결합체의 운반 상태 복원
           this.assembly.detach(this.held);
-          this.setClusterGhost(this.held, true); // 이제 단독이 된 파츠만 다시 고스트
+          this.setClusterCarried(this.held, true); // 이제 단독이 된 파츠만 다시 운반 모드
           this.holdRotation = snapQuaternionTo90(
             new THREE.Quaternion().copy(this.held.body.rotation() as THREE.Quaternion),
           );
@@ -113,11 +118,12 @@ export class Grabber {
   private weldHeld(): void {
     const part = this.held!;
     const target = this.candidate!;
+    this.finishClusterRotation(); // 회전 중이었다면 90° 그리드까지 마저 돌리고 용접
     this.clearCandidate();
     this.held = null;
     this.holdRotation = null;
     part.setHighlight('none');
-    this.setClusterGhost(part, false);
+    this.setClusterCarried(part, false);
     part.body.setGravityScale(1, true);
     this.assembly!.weld(part, target);
   }
@@ -148,17 +154,18 @@ export class Grabber {
   }
 
   /**
-   * 조립 모드에서 들고 있는 파츠(및 그 결합체)를 "고스트"로 전환:
-   * 센서 콜라이더가 되어 다른 물체를 밀거나 부딪히지 않는다.
+   * 조립 모드에서 들고 있는 파츠(및 그 결합체)를 "운반 모드"로 전환.
+   * 센서로 만들면 바닥/벽을 뚫고 지나가므로 충돌은 유지하되, 도미넌스를
+   * 최하로 낮춰 상대 물체가 무한 질량처럼 동작 → 들고 부딪혀도 기존
+   * 구조물이 절대 밀려나지 않고, 들린 쪽만 표면에서 막힌다.
    */
-  private setClusterGhost(part: ToyPart, ghost: boolean): void {
+  private setClusterCarried(part: ToyPart, carried: boolean): void {
     if (!this.assembly) return;
     const members = this.assembly.clusterOf(part);
     for (const p of members) {
-      for (const h of p.colliderHandles) {
-        this.world.getCollider(h)?.setSensor(ghost);
-      }
-      p.body.setGravityScale(ghost ? 0 : 1, true);
+      p.body.setDominanceGroup(carried ? -127 : 0);
+      p.body.enableCcd(carried); // 빠르게 끌 때 얇은 벽 터널링 방지
+      p.body.setGravityScale(carried ? 0 : 1, true);
       p.body.wakeUp();
     }
   }
@@ -169,7 +176,8 @@ export class Grabber {
     part.setHighlight('held');
     part.body.setGravityScale(0, true);
     part.body.wakeUp();
-    this.setClusterGhost(part, true);
+    this.setClusterCarried(part, true);
+    this.clusterRotation = null;
     // 큰 파츠는 좀 더 멀리 들어서 시야를 가리지 않게
     this.holdDistance = Math.min(2.1 + part.boundingRadius, 4);
     // 조립 모드: 잡는 순간 가장 가까운 90° 정렬로 스냅 → 반듯하게 붙이기 쉬움
@@ -193,14 +201,35 @@ export class Grabber {
     if (this.holdRotation) {
       this.holdRotation.premultiply(new THREE.Quaternion().setFromAxisAngle(axis, Math.PI / 2));
     } else if (this.assembly && this.assembly.isBonded(this.held)) {
-      // 결합체는 든 파츠를 피벗으로 통째로 90° 회전 (고스트 상태라 안전)
-      this.rotateClusterAround(this.held, axis);
+      // 결합체는 든 파츠를 피벗으로 90°를 부드럽게 보간 회전
+      // (연타 시 이전 회전을 그리드까지 마저 끝내고 새 회전 시작)
+      this.finishClusterRotation();
+      this.clusterRotation = { axis, remaining: Math.PI / 2 };
     }
   }
 
-  /** 결합체 전체를 pivotPart 위치 기준으로 90° 회전 — 상대 자세가 유지되어 조인트도 그대로 */
-  private rotateClusterAround(pivotPart: ToyPart, axis: THREE.Vector3): void {
-    const q = new THREE.Quaternion().setFromAxisAngle(axis, Math.PI / 2);
+  /** 결합체 회전 애니메이션 한 스텝 진행 */
+  private stepClusterRotation(dt: number): void {
+    if (!this.clusterRotation || !this.held) return;
+    const step = Math.min(this.clusterRotation.remaining, CLUSTER_ROT_SPEED * dt);
+    this.rotateClusterBy(this.held, this.clusterRotation.axis, step);
+    this.clusterRotation.remaining -= step;
+    if (this.clusterRotation.remaining <= 1e-4) this.clusterRotation = null;
+  }
+
+  /** 진행 중인 결합체 회전을 90° 그리드까지 즉시 완료 (용접/놓기/분해 직전에 호출) */
+  private finishClusterRotation(): void {
+    if (!this.clusterRotation || !this.held) {
+      this.clusterRotation = null;
+      return;
+    }
+    this.rotateClusterBy(this.held, this.clusterRotation.axis, this.clusterRotation.remaining);
+    this.clusterRotation = null;
+  }
+
+  /** 결합체 전체를 pivotPart 위치 기준 axis로 angle만큼 회전 — 상대 자세가 유지되어 조인트도 그대로 */
+  private rotateClusterBy(pivotPart: ToyPart, axis: THREE.Vector3, angle: number): void {
+    const q = new THREE.Quaternion().setFromAxisAngle(axis, angle);
     const pv = pivotPart.body.translation();
     const pivot = new THREE.Vector3(pv.x, pv.y, pv.z);
     for (const p of this.assembly!.clusterOf(pivotPart)) {
@@ -214,8 +243,9 @@ export class Grabber {
     }
   }
 
-  private moveHeld(_dt: number): void {
+  private moveHeld(dt: number): void {
     const part = this.held!;
+    this.stepClusterRotation(dt);
     const target = this.camera.position
       .clone()
       .add(this.cameraForward().multiplyScalar(this.holdDistance));
@@ -276,11 +306,12 @@ export class Grabber {
   private release(): void {
     const part = this.held;
     if (!part) return;
+    this.finishClusterRotation();
     this.clearCandidate();
     this.held = null;
     this.holdRotation = null;
     part.setHighlight('none');
-    this.setClusterGhost(part, false);
+    this.setClusterCarried(part, false);
     part.body.setGravityScale(1, true);
     // 들고 있던 관성이 너무 크지 않게 절반으로
     const v = part.body.linvel();
@@ -290,10 +321,11 @@ export class Grabber {
   private throwHeld(): void {
     const part = this.held;
     if (!part) return;
+    this.finishClusterRotation();
     this.held = null;
     this.holdRotation = null;
     part.setHighlight('none');
-    this.setClusterGhost(part, false);
+    this.setClusterCarried(part, false);
     part.body.setGravityScale(1, true);
     const dir = this.cameraForward();
     part.body.setLinvel(
